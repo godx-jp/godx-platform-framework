@@ -4,6 +4,48 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-05-25
+
+Ships the `queue/` module — Laravel-style job queues with memory driver and heavy stubs for SQS, Kafka, and NATS.
+
+### Added
+
+- **`queue/` module** — Manager + Queue facade with Push, Dispatch, and Run worker pool.
+- **Drivers:** `memory` (channel-backed, auto), `sqs` / `kafka` / `nats` (heavy stubs with registration + validation).
+- **Events integration** — `job.processing`, `job.processed`, `job.failed` hooks via optional `events.Bus`.
+- **`examples/queue/main.go`**, **`docs/modules/queue.md`**.
+
+### Tests
+
+- **`queue/driver/registry_test.go`**, **`queue/drivers/*/`**, **`queue/queue_test.go`**, **`queue/module_test.go`**.
+
+### Changed
+
+- `README.md` Modules table shows queue as stable (v0.11.0).
+
+## [0.9.2] — 2026-05-25
+
+Ships the `ratelimit/` module — token-bucket rate limiting with memory and Redis drivers plus HTTP middleware.
+
+### Added
+
+- **`ratelimit/` module** — Manager + Allow/Reset facade over named limiters.
+- **Drivers:** `memory` (sync.Map token buckets, auto), `redis` (Lua token bucket via go-redis, blank import).
+- **`ratelimit/middleware`** — HTTP middleware with `ByIP` / `ByHeader` key funcs; returns 429 + Retry-After.
+- **`examples/ratelimit/main.go`**, **`docs/modules/ratelimit.md`**.
+
+### Tests
+
+- **`ratelimit/driver/registry_test.go`** — Register / Lookup / Names / New; blank-import hint.
+- **`ratelimit/conformance_test.go`** — burst, deny, reset, key isolation, shutdown for memory driver.
+- **`ratelimit/middleware/http_test.go`** — httptest 429 + Retry-After, ByHeader isolation.
+- **`ratelimit/module_test.go`** — App wiring, env defaults, duplicate init, context helpers.
+
+### Changed
+
+- `docs/ARCHITECTURE.md` repository layout lists `ratelimit/` tree.
+- `README.md` Modules table shows ratelimit as stable (v0.9.2).
+
 ## [0.9.1] — 2026-05-25
 
 Ships the `httpclient/` module — swappable HTTP client drivers with OTel client spans.
