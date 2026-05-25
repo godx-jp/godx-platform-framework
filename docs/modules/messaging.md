@@ -173,6 +173,12 @@ type Row struct {
 
 Production NATS settings: leave `MESSAGING_CONN_*_SUBJECT_PREFIX` empty for full TBK subject names; set `JETSTREAM_STREAM`; optional `Spec.Extra["stream_replicas"]` for HA clusters. The NATS driver uses manual Ack/Nak, durable consumers, and infinite reconnect.
 
+### Inbound payload ceiling
+
+The NATS driver enforces a maximum inbound message-body size (default **1 MiB**) before copying a payload into a buffer, so a hostile or misbehaving publisher cannot force the consumer to allocate arbitrarily large messages. An oversized message is **dropped**: it is logged (`log/slog` warning with subject and size) and `Term`'d on the JetStream consumer so it is not redelivered (a Nak would loop forever because the body cannot shrink). Normal-sized messages are unaffected.
+
+Override the ceiling per connection with `Spec.Extra["max_payload_bytes"]`; a value `<= 0` disables the check.
+
 ## Driver matrix
 
 | Driver | Status | Registration | Notes |

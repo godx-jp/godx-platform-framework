@@ -8,6 +8,7 @@ package nats
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +18,13 @@ import (
 	mdriver "github.com/godx-jp/godx-platform-framework/messaging/driver"
 )
 
+// defaultMaxPayloadBytes caps the size of an inbound message body the driver
+// will copy and forward to a handler. SECURITY: without a ceiling a hostile or
+// misbehaving publisher could push very large messages and force the consumer
+// to allocate them unbounded (memory pressure / DoS). Override per connection
+// with Spec.Extra["max_payload_bytes"]; a value <= 0 disables the check.
+const defaultMaxPayloadBytes int64 = 1 << 20 // 1 MiB
+
 func init() {
 	mdriver.Register(mdriver.DriverNATS, New)
 }
@@ -25,6 +33,10 @@ type broker struct {
 	nc     *natsgo.Conn
 	js     natsgo.JetStreamContext
 	prefix string
+
+	// maxPayload is the upper bound (bytes) on an inbound message body. A body
+	// larger than this is dropped instead of being copied into a buffer.
+	maxPayload int64
 
 	mu     sync.Mutex
 	closed bool
@@ -53,7 +65,12 @@ func New(ctx context.Context, spec mdriver.Spec) (mdriver.Broker, error) {
 		nc.Close()
 		return nil, fmt.Errorf("messaging/nats: jetstream: %w", err)
 	}
-	b := &broker{nc: nc, js: js, prefix: spec.SubjectPrefix}
+	b := &broker{
+		nc:         nc,
+		js:         js,
+		prefix:     spec.SubjectPrefix,
+		maxPayload: extraInt64(spec.Extra, "max_payload_bytes", defaultMaxPayloadBytes),
+	}
 	if spec.StreamName != "" {
 		if err := b.ensureStream(ctx, spec.StreamName, spec); err != nil {
 			_ = b.Close(ctx)
@@ -101,6 +118,28 @@ func extraInt(extra map[string]string, key string, def int) int {
 		return def
 	}
 	return n
+}
+
+func extraInt64(extra map[string]string, key string, def int64) int64 {
+	if extra == nil {
+		return def
+	}
+	v := strings.TrimSpace(extra[key])
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+// payloadTooLarge reports whether a body of size bytes exceeds limit. A limit
+// of <= 0 disables the check (unbounded). Kept as a tiny pure helper so the
+// size guard can be unit-tested without a live NATS server.
+func payloadTooLarge(size int, limit int64) bool {
+	return limit > 0 && int64(size) > limit
 }
 
 func durableName(subject, override string) string {
@@ -153,6 +192,19 @@ func (b *broker) Subscribe(ctx context.Context, subject string, handler mdriver.
 	sub, err := b.js.Subscribe(subject, func(m *natsgo.Msg) {
 		if ctx.Err() != nil {
 			_ = m.Nak()
+			return
+		}
+		// SECURITY: enforce an inbound payload ceiling before allocating. An
+		// oversized body is never copied or forwarded; Term() tells JetStream
+		// the message is permanently undeliverable so it is not redelivered
+		// forever (a Nak would loop because the body cannot shrink).
+		if payloadTooLarge(len(m.Data), b.maxPayload) {
+			slog.Warn("messaging/nats: dropping oversized message",
+				"subject", m.Subject,
+				"size", len(m.Data),
+				"max_payload_bytes", b.maxPayload,
+			)
+			_ = m.Term()
 			return
 		}
 		headers := map[string]string{}
