@@ -29,9 +29,11 @@ Index for the godx-platform-framework documentation.
 | `secrets` | stable (v0.8.5) | [modules/secrets](./modules/secrets.md) |
 | `httpclient` | stable (v0.9.1) | [modules/httpclient](./modules/httpclient.md) |
 | `validation` | stable (v0.9.0) | [modules/validation](./modules/validation.md) |
-| `ratelimit` | roadmap (v0.9.2) | — |
-| `mail`, `notifications`, `scheduler`, `featureflag`, `resilience` | roadmap (v0.10.x) | — |
-| `queue` | roadmap (v0.11) | — |
+| `ratelimit` | stable (v0.9.2) | [modules/ratelimit](./modules/ratelimit.md) |
+| `mail` | stable (v0.10.0) | [modules/mail](./modules/mail.md) |
+| `notifications` | stable (v0.10.1) | [modules/notifications](./modules/notifications.md) |
+| `scheduler`, `featureflag`, `resilience` | roadmap (v0.10.x) | — |
+| `queue` | stable (v0.11.0) | [modules/queue](./modules/queue.md) |
 | `httpx` | roadmap (v0.12) | — |
 | `health` | roadmap (v0.14) | — |
 

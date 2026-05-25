@@ -4,6 +4,18 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-05-25
+
+Ships the `notifications/` module — multi-channel Laravel-style notifications.
+
+### Added
+
+- **`notifications/` module** — `Send(ctx, notifiable, notification)` facade with channel drivers.
+- **Channels:** `log`, `mail` (via mail module), `slack`, `discord`, `webhook`, `database` (caller-provided store).
+- **Events:** `notification.sending`, `notification.sent`, `notification.failed` when `events.Module` is wired.
+- **`notifications/contract`** — shared interfaces to avoid driver import cycles.
+- **`examples/notifications/main.go`**, **`docs/modules/notifications.md`**.
+
 ## [0.10.0] — 2026-05-25
 
 Ships the `mail/` module — fluent mailer with log, SMTP, and opt-in cloud transports.
