@@ -14,11 +14,11 @@ import (
 // ("backend"). Selecting a driver is the only knob you need to swap where
 // telemetry goes.
 const (
-	DriverStdout     = "stdout"     // pretty JSON logs to stdout; dev / containers
-	DriverFile       = "file"       // local file with optional rotation; bare-metal / VM
-	DriverOTLP       = "otlp"       // OTLP gRPC/HTTP; godx-platform-observability, Datadog, New Relic, …
-	DriverCloudWatch = "cloudwatch" // AWS CloudWatch Logs/Metrics + X-Ray (stub in 0.3.x, full in 0.4.0)
-	DriverStack      = "stack"      // fan-out: every log record goes to N sub-drivers (Laravel `stack` channel)
+	DriverStdout     = "stdout"     // pretty JSON logs to stdout; dev / containers (auto-registered)
+	DriverFile       = "file"       // local file with optional rotation; bare-metal / VM (auto-registered)
+	DriverStack      = "stack"      // fan-out: every log record goes to N sub-drivers — Laravel `stack` channel (auto-registered)
+	DriverOTLP       = "otlp"       // OTLP gRPC/HTTP; godx-platform-observability, Datadog, New Relic — opt-in (blank import drivers/otlp)
+	DriverCloudWatch = "cloudwatch" // AWS CloudWatch Logs/Metrics + X-Ray — opt-in (blank import drivers/cloudwatch); stub in 0.4.x, full in 0.5.0
 )
 
 // Config controls observability bootstrap. The framework module loads it
@@ -50,7 +50,7 @@ type Config struct {
 	// OTLPInsecure skips TLS verification (dev only).
 	OTLPInsecure bool
 
-	// CloudWatch-only fields. Reserved for the 0.3.0 cloudwatch driver.
+	// CloudWatch-only fields. Reserved for the 0.5.0 cloudwatch driver.
 	AWSRegion          string
 	CloudWatchLogGroup string
 

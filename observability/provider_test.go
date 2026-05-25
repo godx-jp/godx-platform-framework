@@ -12,6 +12,10 @@ import (
 
 	"github.com/godx-jp/godx-platform-framework/framework"
 	"github.com/godx-jp/godx-platform-framework/observability"
+	// Blank-import the heavy drivers under test so the registry resolves
+	// "otlp" and "cloudwatch" — mirrors how a real consumer would opt in.
+	_ "github.com/godx-jp/godx-platform-framework/observability/drivers/cloudwatch"
+	_ "github.com/godx-jp/godx-platform-framework/observability/drivers/otlp"
 )
 
 // captureStdout swaps os.Stdout for a pipe, runs fn, then returns whatever
@@ -120,13 +124,13 @@ func TestProvider_OTLP_RequiresEndpoint(t *testing.T) {
 	}
 }
 
-func TestProvider_CloudWatch_NotImplementedInV02(t *testing.T) {
+func TestProvider_CloudWatch_NotImplementedInV04(t *testing.T) {
 	_, err := observability.NewProvider(context.Background(), observability.Config{
 		ServiceName: "svc",
 		Driver:      observability.DriverCloudWatch,
 	})
 	if err == nil {
-		t.Fatalf("expected ErrCloudWatchNotImplemented for cloudwatch driver in v0.2.x")
+		t.Fatalf("expected ErrNotImplemented for cloudwatch driver in v0.4.x")
 	}
 	if !strings.Contains(err.Error(), "cloudwatch") {
 		t.Fatalf("err should mention cloudwatch: %v", err)

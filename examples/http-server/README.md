@@ -25,9 +25,27 @@ You'll see one `http_request` JSON line per request (logged by the middleware) a
 OBSERVABILITY_DRIVER=file \
 OBSERVABILITY_LOG_FILE_PATH=./logs/app.log \
 go run .
+```
 
+For OTLP, add a blank import to `main.go` first (heavy driver, opt-in):
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/observability/drivers/otlp"
+```
+
+```bash
 # OTLP — needs an OTel Collector on :4317 (run godx-platform-observability with `make up`)
 OBSERVABILITY_DRIVER=otlp \
 OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 \
 go run .
+```
+
+## HTTP middleware location
+
+The middleware lives in `observability/middleware/` so non-HTTP services don't transitively import `net/http`. Usage:
+
+```go
+import "github.com/godx-jp/godx-platform-framework/observability/middleware"
+
+srv := &http.Server{Handler: middleware.HTTP(obs)(mux)}
 ```

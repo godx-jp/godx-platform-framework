@@ -1,43 +1,68 @@
+[← docs index](./README.md)
+
 # Architecture
 
-godx-platform-framework is intentionally small — a backbone for modules, not a framework that owns your `main`.
+godx-platform-framework is intentionally small — a backbone for modules, not a framework that owns your `main`. Every concern (observability today; storage, cache, queue, http tomorrow) is its own module and follows the same layout.
 
 ## Design principles
 
-1. **Composition over configuration.** No magic, no DI graph reflection. `app.Use(module)` and `module.Init(ctx, app)` are the only contracts.
+1. **Composition over configuration.** No DI graph reflection, no magic. `app.Use(module)` and `module.Init(ctx, app)` are the only contracts.
 2. **Modules are pluggable, the backbone is not.** Adding a feature means adding a module; you never patch the core.
-3. **Wire-format-first.** Telemetry is shipped via OpenTelemetry (OTLP) wherever possible — never a vendor SDK in user code.
-4. **Driver pattern for destinations.** Selecting Loki/Tempo vs CloudWatch vs Datadog vs local-file is a config decision, not a code change.
-5. **Stdlib-first.** Where the stdlib is sufficient (`log/slog`, `net/http`), we wrap it; we do not replace it.
-6. **No abbreviations in env vars.** Every variable starts with the namespace spelled out (`OBSERVABILITY_*`) unless it is a documented industry standard (`OTEL_*`, `AWS_*`, `DEPLOYMENT_ENVIRONMENT`).
+3. **One module per concern at the repository root.** Mirrors `go-kit`, `kratos`, `go-common`. No god-package, no top-level `pkg/` indirection.
+4. **Driver pattern for destinations.** Every module that talks to a backend exposes a swappable driver — see [DRIVER_PATTERN](./DRIVER_PATTERN.md).
+5. **Pay-for-what-you-use dependencies.** Light drivers are auto-registered; heavy drivers require a blank import. A service that only uses stdout never pulls AWS or OTLP into the binary.
+6. **Stdlib-first.** Where the stdlib is sufficient (`log/slog`, `net/http`), we wrap it; we do not replace it.
+7. **No abbreviations in env vars.** Every variable starts with the spelled-out namespace (`OBSERVABILITY_*`) unless it is a documented industry standard (`OTEL_*`, `AWS_*`, `DEPLOYMENT_ENVIRONMENT`).
 
-## Layered model
+## Repository layout
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  Your service                                                │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  framework.App                                         │  │
-│  │  ┌──────────────────────────────────────────────────┐  │  │
-│  │  │  observability.Module                            │  │  │
-│  │  │  ┌────────────────────────────────────────────┐  │  │  │
-│  │  │  │  observability.Provider                    │  │  │  │
-│  │  │  │  - slog.Logger (with context handler)      │  │  │  │
-│  │  │  │  - trace.Tracer                            │  │  │  │
-│  │  │  │  - metric.Meter                            │  │  │  │
-│  │  │  │  - http.Handler middleware                 │  │  │  │
-│  │  │  └────────────────────────────────────────────┘  │  │  │
-│  │  │                  │ uses                           │  │  │
-│  │  │                  ▼                                │  │  │
-│  │  │  ┌────────────────────────────────────────────┐  │  │  │
-│  │  │  │  drivers.Driver                            │  │  │  │
-│  │  │  │  stdout · file · otlp · cloudwatch (stub)  │  │  │  │
-│  │  │  └────────────────────────────────────────────┘  │  │  │
-│  │  └──────────────────────────────────────────────────┘  │  │
-│  │  (future) httpx · dbx · cachex · queuex · eventbus     │  │
-│  └────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────┘
+godx-platform-framework/
+├── go.mod                              github.com/godx-jp/godx-platform-framework
+├── README · CHANGELOG · VERSION · LICENSE · Makefile · .golangci.yml
+│
+├── framework/                          Core backbone: App, Module, lifecycle
+│
+├── observability/                      Module — logs / traces / metrics
+│   ├── doc.go · module.go · config.go · provider.go · channel.go · context.go
+│   ├── register.go                     Blank-imports light drivers
+│   ├── driver/                         Public driver contract (interface, Spec, registry)
+│   ├── drivers/                        Built-in drivers, one package each
+│   │   ├── stdout/ · file/ · stack/    (light — auto-registered)
+│   │   ├── otlp/                       (heavy — opt-in blank import)
+│   │   └── cloudwatch/                 (heavy — opt-in; stub until 0.5.0)
+│   └── middleware/                     Optional HTTP middleware sub-package
+│
+├── storage/                            Future — same skeleton (driver/, drivers/local|s3|gcs/, ...)
+├── cache/                              Future — same skeleton (driver/, drivers/memory|redis/, ...)
+├── queue/                              Future
+├── httpx/                              Future
+│
+├── examples/                           Runnable programs — minimal, http-server, …
+└── docs/                               This directory
+    ├── README.md · GETTING_STARTED.md · ARCHITECTURE.md
+    ├── DRIVER_PATTERN.md               Shared convention for every module
+    ├── CONFIGURATION.md · VERSIONING.md
+    └── modules/observability.md        Per-module reference (one file per module)
 ```
+
+The internal layout of every future module is identical to `observability/` — see [DRIVER_PATTERN — Layout convention](./DRIVER_PATTERN.md#layout-convention).
+
+## Backbone (the `framework` package)
+
+```
+framework.New(name, version)        →  *App
+  .Use(module)                      →  *App (chainable; registration order preserved)
+  .Init(ctx)                        →  call Module.Init on each in order
+  .Run(ctx)                         →  block until ctx canceled or signal
+  .Shutdown(ctx)                    →  run OnShutdown hooks in reverse order
+
+Module interface:
+  Name()                            string
+  Init(ctx, app)                    error    // may app.Store(key, val), app.OnShutdown(fn)
+```
+
+A `Module` is the only contract the framework defines. No DI graph, no reflection, no service locator.
 
 ## Lifecycle
 
@@ -67,7 +92,40 @@ app.Shutdown(ctx)
    └─ hook 1   ┘
 ```
 
-## Driver pattern (observability)
+## Layered view
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  Your service                                                    │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  framework.App                                             │  │
+│  │  ┌──────────────────────────────────────────────────────┐  │  │
+│  │  │  observability.Module                                │  │  │
+│  │  │  ┌────────────────────────────────────────────────┐  │  │  │
+│  │  │  │  observability.Provider                        │  │  │  │
+│  │  │  │   - slog.Logger (with context handler)         │  │  │  │
+│  │  │  │   - trace.Tracer (OTel)                        │  │  │  │
+│  │  │  │   - metric.Meter (OTel)                        │  │  │  │
+│  │  │  │   - Channel("audit") *slog.Logger              │  │  │  │
+│  │  │  └────────────┬───────────────────────────────────┘  │  │  │
+│  │  │               │ driver.Driver (resolved by registry)  │  │  │
+│  │  │               ▼                                       │  │  │
+│  │  │  ┌────────────────────────────────────────────────┐  │  │  │
+│  │  │  │  drivers/stdout · file · stack · otlp · ...    │  │  │  │
+│  │  │  └────────────────────────────────────────────────┘  │  │  │
+│  │  └──────────────────────────────────────────────────────┘  │  │
+│  │                                                             │  │
+│  │  ┌──────────────────────────────────────────────────────┐  │  │
+│  │  │  middleware (observability/middleware) — optional    │  │  │
+│  │  │  middleware.HTTP(obs)(handler) — span + correlation  │  │  │
+│  │  └──────────────────────────────────────────────────────┘  │  │
+│  │                                                             │  │
+│  │  (future) storage · cache · queue · httpx · eventbus       │  │
+│  └─────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+## Driver pattern (uniform across modules)
 
 ```
               ┌────────────────────┐
@@ -78,43 +136,47 @@ app.Shutdown(ctx)
                         │ stable API (slog, OTel)
                         ▼
               ┌────────────────────┐
-              │ observability.     │
-              │   Provider         │
+              │ <module>.Provider  │
               └─────────┬──────────┘
-                        │ Driver interface
+                        │ driver.Driver interface
                         ▼
-  ┌──────────┬───────────────┬────────────┬───────────────┬──────────────┐
-  │ stdout   │ file          │ otlp       │ stack         │ cloudwatch   │
-  │ (dev,    │ (Laravel-     │ (LGTM,     │ (fan-out      │ (AWS, 0.4.0) │
-  │  k8s)    │  style local) │  Datadog…) │  to N drivers)│              │
-  └──────────┴───────────────┴────────────┴───────────────┴──────────────┘
+   ┌──────────┬──────────┬──────────┬──────────┬──────────────┐
+   │ stdout   │ file     │ stack    │ otlp     │ cloudwatch   │
+   │ (light,  │ (light,  │ (light,  │ (heavy,  │ (heavy,      │
+   │  auto)   │  auto)   │  auto)   │  opt-in) │  opt-in)     │
+   └──────────┴──────────┴──────────┴──────────┴──────────────┘
 
-   selected by:  OBSERVABILITY_DRIVER=stdout|file|otlp|stack|cloudwatch
+  selected by:  OBSERVABILITY_DRIVER=stdout|file|stack|otlp|cloudwatch
+  opt-in:       import _ ".../observability/drivers/otlp"
 ```
 
 The application **never** imports an exporter or a vendor SDK. Swapping the driver is a deployment configuration change, not a recompile.
 
+The same pattern repeats for every future module — see [DRIVER_PATTERN](./DRIVER_PATTERN.md).
+
 ## Why a separate "framework" repo
 
-- **Reusability across teams.** `godx-platform-framework` is consumed by multiple products (tiximax is just the first); each pulls a pinned SemVer tag.
-- **Independent release cadence.** The framework can iterate (e.g. ship 0.2.0 with the CloudWatch driver) without touching consumer repos.
-- **Pluggable testing.** Backends and modules are interchangeable, which keeps unit tests fast and hermetic (use `stdout` everywhere).
+- **Reusability across teams.** Consumed by multiple products (tiximax is the first); each pulls a pinned SemVer tag.
+- **Independent release cadence.** The framework can iterate (e.g. ship 0.5 with storage) without touching consumer repos.
+- **Pluggable testing.** Drivers and modules are interchangeable, which keeps unit tests fast and hermetic (use `stdout` everywhere).
 
 ## What this is NOT
 
-- Not a full DI framework. No reflective wiring, no service graphs. If you need that, use [uber-go/fx](https://github.com/uber-go/fx) instead.
-- Not an HTTP framework. The observability middleware is `net/http`-compatible; bring your own router (chi, echo, gin, mux, etc.).
-- Not a config framework (yet). v0.1 reads from env only; richer config is on the roadmap.
+- Not a full DI framework. No reflective wiring, no service graphs. If you need that, use [uber-go/fx](https://github.com/uber-go/fx).
+- Not an HTTP framework. The `observability/middleware` sub-package is `net/http`-compatible; bring your own router (chi, echo, gin, mux, ...).
+- Not a config framework (yet). v0.4 reads from env only; a richer config module is on the roadmap.
 
 ## Roadmap
 
-| Version | Modules added |
-|---------|---------------|
-| 0.1.x | initial scaffold (deprecated naming) |
-| 0.2.x | env-var rename to full `OBSERVABILITY_*`, `Backend` → `Driver` |
-| 0.3.x | `stack` driver (Laravel fan-out), named channels (`obs.Channel("audit").Info(...)`) |
-| 0.4.x | `cloudwatch` driver (AWS ADOT), configurable correlation header |
-| 0.5.x | `httpx` (chi router + handlers) |
-| 0.6.x | `dbx` (sqlc + outbox), `cachex` |
-| 0.7.x | `queuex`, `eventbus` |
-| 1.0.0 | API freeze; semver guarantees for `1.x` |
+| Version | Theme | Highlights |
+|---------|-------|------------|
+| 0.1.x | initial scaffold | first cut of framework + observability (deprecated naming) |
+| 0.2.x | naming cleanup | env-var rename to full `OBSERVABILITY_*`; `Backend` → `Driver` |
+| 0.3.x | multi-channel | `stack` driver (Laravel fan-out), named channels (`obs.Channel("audit")`) |
+| 0.4.x | **layout standardisation** | per-driver subpackages, `<module>/driver` registry, `<module>/middleware` sub-package, opt-in heavy drivers |
+| 0.5.x | `cloudwatch` driver | AWS ADOT exporters; configurable correlation header |
+| 0.6.x | `storage` module | drivers: local · s3 · gcs · azure · minio |
+| 0.7.x | `cache` module | drivers: memory · redis · memcached |
+| 0.8.x | `queue` module | drivers: in-memory · sqs · kafka · nats |
+| 0.9.x | `httpx` module | chi router + handler conventions |
+| 1.0.0 | API freeze | SemVer guarantees for `1.x` |

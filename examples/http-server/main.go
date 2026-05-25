@@ -17,6 +17,7 @@ import (
 
 	"github.com/godx-jp/godx-platform-framework/framework"
 	"github.com/godx-jp/godx-platform-framework/observability"
+	"github.com/godx-jp/godx-platform-framework/observability/middleware"
 )
 
 func main() {
@@ -38,7 +39,7 @@ func main() {
 	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           obs.Middleware(mux),
+		Handler:           middleware.HTTP(obs)(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

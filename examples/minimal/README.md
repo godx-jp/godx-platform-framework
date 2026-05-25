@@ -15,15 +15,23 @@ Expected output (one JSON line):
 Try switching driver without changing code:
 
 ```bash
-# OTLP (needs an OTel Collector listening on :4317)
-OBSERVABILITY_DRIVER=otlp \
-OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 \
-go run .
-
-# File (Laravel-style; rotates daily by default)
+# File (Laravel-style; rotates daily by default — auto-registered, no extra import)
 OBSERVABILITY_DRIVER=file \
 OBSERVABILITY_LOG_FILE_PATH=./logs/app.log \
 go run .
 ```
 
-The program is identical; only the env vars change.
+For OTLP, add a blank import to `main.go` (heavy driver — opt-in to keep binaries small):
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/observability/drivers/otlp"
+```
+
+```bash
+# OTLP (needs an OTel Collector listening on :4317)
+OBSERVABILITY_DRIVER=otlp \
+OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 \
+go run .
+```
+
+The program is identical otherwise; only the env vars change.

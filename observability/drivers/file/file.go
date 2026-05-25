@@ -1,4 +1,13 @@
-package drivers
+// Package file is the local-file observability driver — Laravel's `single`
+// and `daily` log channels for Go. Writes structured JSON to a path with
+// optional rotation by size or local date; traces are kept in-process so
+// trace_id still appears in records. Auto-registered when the observability
+// package is imported.
+//
+// Suitable for bare-metal / VM deployments and projects that cannot afford
+// a hosted backend. Not recommended for containerised workloads — use the
+// stdout driver and let the orchestrator collect logs instead.
+package file
 
 import (
 	"context"
@@ -16,34 +25,26 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/godx-jp/godx-platform-framework/observability/driver"
 )
 
-// fileDriver writes structured JSON logs to a local file, with optional
-// rotation. Like the `stdout` driver, traces are kept in-process (so
-// `trace_id` still appears in log records) and metrics are no-op — the
-// driver is a log channel, not a transport.
-//
-// Suitable for: bare-metal / VM deployments, projects that cannot afford a
-// hosted backend, dev environments where stdout is too noisy. Not
-// recommended for containerised workloads (use `stdout` so the orchestrator
-// can collect logs instead).
-type fileDriver struct {
-	handler slog.Handler
-	tp      *sdktrace.TracerProvider
-	close   func() error
+// Name is the identifier used by OBSERVABILITY_DRIVER to select this driver.
+const Name = "file"
 
-	stopRot  chan struct{}
-	stopOnce sync.Once
-}
-
-// File rotation modes accepted via OBSERVABILITY_LOG_FILE_ROTATION.
+// Rotation modes accepted via OBSERVABILITY_LOG_FILE_ROTATION.
 const (
-	LogFileRotationNone  = "none"  // append-only, no rotation
-	LogFileRotationDaily = "daily" // rotate at local midnight
-	LogFileRotationSize  = "size"  // rotate when MaxSize is reached
+	RotationNone  = "none"  // append-only, no rotation
+	RotationDaily = "daily" // rotate at local midnight (default)
+	RotationSize  = "size"  // rotate when MaxSize is reached
 )
 
-func newFile(s Spec) (*fileDriver, error) {
+func init() { driver.Register(Name, New) }
+
+// New constructs the file driver from spec. Returns an error if LogFilePath
+// is empty, the parent directory cannot be created, the file cannot be
+// opened, or LogFileRotation is unrecognised.
+func New(_ context.Context, s driver.Spec) (driver.Driver, error) {
 	if s.LogFilePath == "" {
 		return nil, fmt.Errorf("file driver: LogFilePath required (set OBSERVABILITY_LOG_FILE_PATH)")
 	}
@@ -58,7 +59,7 @@ func newFile(s Spec) (*fileDriver, error) {
 
 	rotation := strings.ToLower(s.LogFileRotation)
 	if rotation == "" {
-		rotation = LogFileRotationDaily
+		rotation = RotationDaily
 	}
 
 	var (
@@ -68,7 +69,7 @@ func newFile(s Spec) (*fileDriver, error) {
 		isDaily bool
 	)
 	switch rotation {
-	case LogFileRotationNone:
+	case RotationNone:
 		f, err := os.OpenFile(abs, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			return nil, fmt.Errorf("file driver: open %s: %w", abs, err)
@@ -76,7 +77,7 @@ func newFile(s Spec) (*fileDriver, error) {
 		w = f
 		closeFn = f.Close
 
-	case LogFileRotationSize, LogFileRotationDaily:
+	case RotationSize, RotationDaily:
 		lj = &lumberjack.Logger{
 			Filename:   abs,
 			MaxSize:    nonZeroInt(s.LogFileMaxSizeMB, 100),
@@ -87,32 +88,39 @@ func newFile(s Spec) (*fileDriver, error) {
 		}
 		w = lj
 		closeFn = lj.Close
-		isDaily = rotation == LogFileRotationDaily
+		isDaily = rotation == RotationDaily
 
 	default:
 		return nil, fmt.Errorf("file driver: unknown OBSERVABILITY_LOG_FILE_ROTATION %q (valid: none, size, daily)", rotation)
 	}
 
-	d := &fileDriver{
+	d := &impl{
 		handler: slog.NewJSONHandler(w, &slog.HandlerOptions{Level: s.LogLevel}),
 		tp: sdktrace.NewTracerProvider(
-			sdktrace.WithSampler(samplerFor(s.TraceSampleRate)),
-			sdktrace.WithResource(resourceFor(s)),
+			sdktrace.WithSampler(driver.SamplerFor(s.TraceSampleRate)),
+			sdktrace.WithResource(driver.ResourceFor(s)),
 		),
 		close: closeFn,
 	}
-
 	if isDaily {
 		d.startDailyRotator(lj)
 	}
 	return d, nil
 }
 
-func (d *fileDriver) LoggerHandler() slog.Handler          { return d.handler }
-func (d *fileDriver) TracerProvider() trace.TracerProvider { return d.tp }
-func (d *fileDriver) MeterProvider() metric.MeterProvider  { return metricnoop.NewMeterProvider() }
+type impl struct {
+	handler  slog.Handler
+	tp       *sdktrace.TracerProvider
+	close    func() error
+	stopRot  chan struct{}
+	stopOnce sync.Once
+}
 
-func (d *fileDriver) Shutdown(ctx context.Context) error {
+func (d *impl) LoggerHandler() slog.Handler          { return d.handler }
+func (d *impl) TracerProvider() trace.TracerProvider { return d.tp }
+func (d *impl) MeterProvider() metric.MeterProvider  { return metricnoop.NewMeterProvider() }
+
+func (d *impl) Shutdown(ctx context.Context) error {
 	d.stopOnce.Do(func() {
 		if d.stopRot != nil {
 			close(d.stopRot)
@@ -130,7 +138,7 @@ func (d *fileDriver) Shutdown(ctx context.Context) error {
 // startDailyRotator spawns a goroutine that calls lumberjack.Rotate() at
 // local midnight. Lumberjack's native rotation is size-based; this wrapper
 // adds time-based rotation on top.
-func (d *fileDriver) startDailyRotator(lj *lumberjack.Logger) {
+func (d *impl) startDailyRotator(lj *lumberjack.Logger) {
 	d.stopRot = make(chan struct{})
 	stop := d.stopRot
 	go func() {

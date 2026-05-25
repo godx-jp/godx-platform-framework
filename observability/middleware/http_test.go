@@ -1,16 +1,49 @@
-package observability_test
+package middleware_test
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"sync"
 	"testing"
 
 	"github.com/godx-jp/godx-platform-framework/observability"
+	"github.com/godx-jp/godx-platform-framework/observability/middleware"
 )
 
-func TestMiddleware_PropagatesCorrelationAndTrace(t *testing.T) {
+// captureStdout is duplicated from the observability package's test helpers —
+// kept here so middleware tests stay decoupled from the parent package's
+// _test.go internals.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+
+	var buf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _ = buf.ReadFrom(r)
+	}()
+
+	fn()
+
+	_ = w.Close()
+	wg.Wait()
+	os.Stdout = orig
+	return buf.String()
+}
+
+func TestHTTP_PropagatesCorrelationAndTrace(t *testing.T) {
 	_ = captureStdout(t, func() {
 		p, err := observability.NewProvider(context.Background(), observability.Config{
 			ServiceName: "mw-svc",
@@ -27,14 +60,15 @@ func TestMiddleware_PropagatesCorrelationAndTrace(t *testing.T) {
 			gotInner *observability.Provider
 		)
 
-		handler := p.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wrap := middleware.HTTP(p)
+		handler := wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotCID = observability.CorrelationIDFromContext(r.Context())
 			gotInner = observability.FromContext(r.Context())
 			w.WriteHeader(http.StatusTeapot)
 		}))
 
 		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-		req.Header.Set(observability.CorrelationHeader, "cid-fixed")
+		req.Header.Set(middleware.CorrelationHeader, "cid-fixed")
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)
@@ -42,8 +76,8 @@ func TestMiddleware_PropagatesCorrelationAndTrace(t *testing.T) {
 		if rec.Code != http.StatusTeapot {
 			t.Errorf("status = %d, want 418", rec.Code)
 		}
-		if rec.Header().Get(observability.CorrelationHeader) != "cid-fixed" {
-			t.Errorf("response header CID = %q, want cid-fixed", rec.Header().Get(observability.CorrelationHeader))
+		if rec.Header().Get(middleware.CorrelationHeader) != "cid-fixed" {
+			t.Errorf("response header CID = %q, want cid-fixed", rec.Header().Get(middleware.CorrelationHeader))
 		}
 		if gotCID != "cid-fixed" {
 			t.Errorf("downstream CID = %q, want cid-fixed", gotCID)
@@ -54,7 +88,7 @@ func TestMiddleware_PropagatesCorrelationAndTrace(t *testing.T) {
 	})
 }
 
-func TestMiddleware_GeneratesCorrelationWhenMissing(t *testing.T) {
+func TestHTTP_GeneratesCorrelationWhenMissing(t *testing.T) {
 	_ = captureStdout(t, func() {
 		p, err := observability.NewProvider(context.Background(), observability.Config{
 			ServiceName: "mw-svc",
@@ -66,7 +100,8 @@ func TestMiddleware_GeneratesCorrelationWhenMissing(t *testing.T) {
 		defer p.Shutdown(context.Background())
 
 		var gotCID string
-		handler := p.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wrap := middleware.HTTP(p)
+		handler := wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotCID = observability.CorrelationIDFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -78,7 +113,7 @@ func TestMiddleware_GeneratesCorrelationWhenMissing(t *testing.T) {
 		if len(gotCID) != 32 {
 			t.Errorf("generated CID len = %d, want 32 hex chars", len(gotCID))
 		}
-		if rec.Header().Get(observability.CorrelationHeader) != gotCID {
+		if rec.Header().Get(middleware.CorrelationHeader) != gotCID {
 			t.Errorf("response CID header does not match downstream CID")
 		}
 	})

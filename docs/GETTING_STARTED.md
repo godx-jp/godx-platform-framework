@@ -1,3 +1,5 @@
+[← docs index](./README.md)
+
 # Getting started
 
 Five minutes from zero to a Go service emitting traced, correlated, structured telemetry.
@@ -62,7 +64,7 @@ Expected output (formatted for readability):
 }
 ```
 
-Note: the SDK auto-injects `trace_id` and `span_id` from the active span — you didn't pass them in.
+The SDK auto-injects `trace_id` and `span_id` from the active span — you didn't pass them in.
 
 ## 4. Switch to the file driver (Laravel-style local logs)
 
@@ -76,9 +78,19 @@ go run .
 tail -f logs/app.log
 ```
 
-Defaults: daily rotation, 14-day retention, gzip on rotation. See [DRIVERS.md](./DRIVERS.md#file) for tuning.
+Defaults: daily rotation, 14-day retention, gzip on rotation. See [modules/observability — file](./modules/observability.md#file) for tuning.
 
 ## 5. Switch to OTLP (push to godx-platform-observability)
+
+OTLP is a **heavy driver** — it's opt-in via a blank import to keep binaries small for services that don't need it:
+
+```go
+import (
+    "github.com/godx-jp/godx-platform-framework/framework"
+    "github.com/godx-jp/godx-platform-framework/observability"
+    _ "github.com/godx-jp/godx-platform-framework/observability/drivers/otlp" // opt-in
+)
+```
 
 Spin up the observability plane in a sibling repo:
 
@@ -97,9 +109,22 @@ go run .
 
 Open Grafana at `http://localhost:3000` (default `admin/admin`) and find the trace under **Explore → Tempo**.
 
-## 6. Add an HTTP middleware
+If you forget the blank import, you'll get a clear runtime error:
+
+```
+observability/driver: "otlp" not registered (have: [file stack stdout]) — heavy drivers require an explicit blank import, e.g. _ "github.com/godx-jp/godx-platform-framework/observability/drivers/otlp"
+```
+
+## 6. Add HTTP middleware
+
+The HTTP middleware lives in its own sub-package so non-HTTP callers don't transitively import `net/http`:
 
 ```go
+import (
+    "github.com/godx-jp/godx-platform-framework/observability"
+    "github.com/godx-jp/godx-platform-framework/observability/middleware"
+)
+
 mux := http.NewServeMux()
 mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
     obs := observability.FromContext(r.Context())
@@ -107,16 +132,19 @@ mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
     _, _ = w.Write([]byte("hi\n"))
 })
 
-srv := &http.Server{Addr: ":8080", Handler: obs.Middleware(mux)}
+obs := observability.FromApp(app)
+srv := &http.Server{Addr: ":8080", Handler: middleware.HTTP(obs)(mux)}
 ```
 
 Every request now produces:
+
 - A server-kind span for the request.
 - A correlation ID (echoed in `X-Correlation-ID` response header).
 - One `http_request` log line with `method`, `path`, `status`, `duration_ms`.
 
 ## Next steps
 
-- **[OBSERVABILITY](./OBSERVABILITY.md)** — full SDK reference (logger, tracer, meter).
-- **[DRIVERS](./DRIVERS.md)** — driver pattern, adding a new driver.
+- **[ARCHITECTURE](./ARCHITECTURE.md)** — how the framework backbone and modules fit together.
+- **[DRIVER_PATTERN](./DRIVER_PATTERN.md)** — shared convention for swappable backends (applies to every module).
+- **[modules/observability](./modules/observability.md)** — full SDK reference (logger, tracer, meter, channels, drivers).
 - **[CONFIGURATION](./CONFIGURATION.md)** — every env var.

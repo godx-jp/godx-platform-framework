@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/godx-jp/godx-platform-framework/observability"
-	"github.com/godx-jp/godx-platform-framework/observability/drivers"
+	filedrv "github.com/godx-jp/godx-platform-framework/observability/drivers/file"
 )
 
 func TestFileDriver_Single_WritesJSONLine(t *testing.T) {
@@ -23,7 +23,7 @@ func TestFileDriver_Single_WritesJSONLine(t *testing.T) {
 		Driver:          observability.DriverFile,
 		LogLevel:        slog.LevelInfo,
 		LogFilePath:     path,
-		LogFileRotation: drivers.LogFileRotationNone,
+		LogFileRotation: filedrv.RotationNone,
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -60,7 +60,7 @@ func TestFileDriver_AutoCreatesParentDir(t *testing.T) {
 		ServiceName:     "svc",
 		Driver:          observability.DriverFile,
 		LogFilePath:     path,
-		LogFileRotation: drivers.LogFileRotationNone,
+		LogFileRotation: filedrv.RotationNone,
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -131,7 +131,7 @@ func TestFileDriver_LogLevelFiltered(t *testing.T) {
 		Driver:          observability.DriverFile,
 		LogLevel:        slog.LevelWarn,
 		LogFilePath:     path,
-		LogFileRotation: drivers.LogFileRotationNone,
+		LogFileRotation: filedrv.RotationNone,
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)

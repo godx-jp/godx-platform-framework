@@ -6,17 +6,18 @@ import (
 	"log/slog"
 	"sync/atomic"
 
-	"github.com/godx-jp/godx-platform-framework/observability/drivers"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/godx-jp/godx-platform-framework/observability/driver"
 )
 
 // Provider holds the live observability handles for a service. Obtain one via
 // the framework module ([Module]) or directly with [NewProvider].
 type Provider struct {
 	cfg    Config
-	driver drivers.Driver
+	driver driver.Driver
 	logger *slog.Logger
 	tracer trace.Tracer
 	meter  metric.Meter
@@ -32,7 +33,7 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 		return nil, err
 	}
 
-	d, err := drivers.New(ctx, drivers.Spec{
+	d, err := driver.New(ctx, driver.Spec{
 		Name:               cfg.Driver,
 		ServiceName:        cfg.ServiceName,
 		ServiceVersion:     cfg.ServiceVersion,

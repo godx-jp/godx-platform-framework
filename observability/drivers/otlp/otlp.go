@@ -1,4 +1,14 @@
-package drivers
+// Package otlp ships traces and metrics over OTLP (gRPC or HTTP) to any
+// compatible backend — godx-platform-observability, Datadog Agent, New
+// Relic, Honeycomb, Grafana Cloud, etc. Logs continue to write to stdout so
+// container orchestrators or log collectors can ship them alongside the
+// rest of stdout.
+//
+// Heavy driver (~20MB of OTel exporter dependencies). NOT auto-registered;
+// add an explicit blank import to enable:
+//
+//	import _ "github.com/godx-jp/godx-platform-framework/observability/drivers/otlp"
+package otlp
 
 import (
 	"context"
@@ -15,20 +25,18 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/godx-jp/godx-platform-framework/observability/driver"
 )
 
-// otlpDriver exports traces and metrics over OTLP (gRPC or HTTP) and writes
-// logs as JSON to stdout. Log shipping is handled out-of-process (Promtail,
-// Fluent Bit, OTel Collector filelog receiver). This keeps the in-process
-// dependency surface small and aligns with the standard Loki / Datadog
-// container-log workflow.
-type otlpDriver struct {
-	handler slog.Handler
-	tp      *sdktrace.TracerProvider
-	mp      *sdkmetric.MeterProvider
-}
+// Name is the identifier used by OBSERVABILITY_DRIVER to select this driver.
+const Name = "otlp"
 
-func newOTLP(ctx context.Context, s Spec) (*otlpDriver, error) {
+func init() { driver.Register(Name, New) }
+
+// New constructs the OTLP driver from spec. Returns an error if the configured
+// endpoint cannot establish an exporter.
+func New(ctx context.Context, s driver.Spec) (driver.Driver, error) {
 	traceExp, err := newTraceExporter(ctx, s)
 	if err != nil {
 		return nil, fmt.Errorf("otlp trace exporter: %w", err)
@@ -38,37 +46,39 @@ func newOTLP(ctx context.Context, s Spec) (*otlpDriver, error) {
 		return nil, fmt.Errorf("otlp metric exporter: %w", err)
 	}
 
-	res := resourceFor(s)
-
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceExp),
-		sdktrace.WithSampler(samplerFor(s.TraceSampleRate)),
-		sdktrace.WithResource(res),
-	)
-	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp)),
-		sdkmetric.WithResource(res),
-	)
-
-	return &otlpDriver{
+	res := driver.ResourceFor(s)
+	return &impl{
 		handler: slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: s.LogLevel}),
-		tp:      tp,
-		mp:      mp,
+		tp: sdktrace.NewTracerProvider(
+			sdktrace.WithBatcher(traceExp),
+			sdktrace.WithSampler(driver.SamplerFor(s.TraceSampleRate)),
+			sdktrace.WithResource(res),
+		),
+		mp: sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp)),
+			sdkmetric.WithResource(res),
+		),
 	}, nil
 }
 
-func (d *otlpDriver) LoggerHandler() slog.Handler          { return d.handler }
-func (d *otlpDriver) TracerProvider() trace.TracerProvider { return d.tp }
-func (d *otlpDriver) MeterProvider() metric.MeterProvider  { return d.mp }
+type impl struct {
+	handler slog.Handler
+	tp      *sdktrace.TracerProvider
+	mp      *sdkmetric.MeterProvider
+}
 
-func (d *otlpDriver) Shutdown(ctx context.Context) error {
+func (d *impl) LoggerHandler() slog.Handler          { return d.handler }
+func (d *impl) TracerProvider() trace.TracerProvider { return d.tp }
+func (d *impl) MeterProvider() metric.MeterProvider  { return d.mp }
+
+func (d *impl) Shutdown(ctx context.Context) error {
 	if err := d.tp.Shutdown(ctx); err != nil {
 		return err
 	}
 	return d.mp.Shutdown(ctx)
 }
 
-func newTraceExporter(ctx context.Context, s Spec) (sdktrace.SpanExporter, error) {
+func newTraceExporter(ctx context.Context, s driver.Spec) (sdktrace.SpanExporter, error) {
 	switch s.OTLPProtocol {
 	case "http", "http/protobuf":
 		opts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(s.OTLPEndpoint)}
@@ -85,7 +95,7 @@ func newTraceExporter(ctx context.Context, s Spec) (sdktrace.SpanExporter, error
 	}
 }
 
-func newMetricExporter(ctx context.Context, s Spec) (sdkmetric.Exporter, error) {
+func newMetricExporter(ctx context.Context, s driver.Spec) (sdkmetric.Exporter, error) {
 	switch s.OTLPProtocol {
 	case "http", "http/protobuf":
 		opts := []otlpmetrichttp.Option{otlpmetrichttp.WithEndpoint(s.OTLPEndpoint)}

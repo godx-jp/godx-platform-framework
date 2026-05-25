@@ -1,3 +1,5 @@
+[← docs index](./README.md)
+
 # Configuration reference
 
 All configuration is via environment variables (12-factor). The SDK ships with sensible defaults; in dev you typically need to set zero.
@@ -19,17 +21,13 @@ Naming rules:
 
 | Variable | Type | Default | Purpose |
 |----------|------|---------|---------|
-| `OBSERVABILITY_DRIVER` | enum | `stdout` | Driver selector: `stdout` · `file` · `otlp` · `stack` · `cloudwatch` |
+| `OBSERVABILITY_DRIVER` | enum | `stdout` | Driver selector: `stdout` · `file` · `stack` · `otlp` · `cloudwatch` |
 | `OBSERVABILITY_LOG_LEVEL` | enum | `info` | `debug` · `info` · `warn` · `error` |
 | `OBSERVABILITY_TRACE_SAMPLE_RATE` | float | `1.0` | Sample rate in `[0..1]`; outside the range ⇒ always sample |
 
-## Observability — stack driver
+## Observability — light drivers (auto-registered)
 
-Required when `OBSERVABILITY_DRIVER=stack`. Every log record fans out to each named sub-driver in order. Each sub-driver inherits the rest of the env (so set `OBSERVABILITY_LOG_FILE_PATH` for a `file` sub-driver, `OTEL_EXPORTER_OTLP_ENDPOINT` for an `otlp` sub-driver, etc.).
-
-| Variable | Type | Default | Purpose |
-|----------|------|---------|---------|
-| `OBSERVABILITY_STACK_DRIVERS` | comma list | _required_ | Sub-drivers in dispatch order, e.g. `stdout,file`. Whitespace tolerated. `stack` may not appear (no nesting). |
+`stdout`, `file`, and `stack` are registered automatically when the `observability` package is imported. No blank import needed.
 
 ## Observability — file driver
 
@@ -44,7 +42,25 @@ Required when `OBSERVABILITY_DRIVER=file`. Laravel-style local file logging.
 | `OBSERVABILITY_LOG_FILE_MAX_BACKUPS` | int | `0` | Keep at most N rotated files; `0` = unlimited |
 | `OBSERVABILITY_LOG_FILE_COMPRESS` | bool | `true` | Gzip rotated files |
 
-## Observability — OTLP driver
+## Observability — stack driver
+
+Required when `OBSERVABILITY_DRIVER=stack`. Every log record fans out to each named sub-driver in order. Each sub-driver inherits the rest of the env (so set `OBSERVABILITY_LOG_FILE_PATH` for a `file` sub-driver, `OTEL_EXPORTER_OTLP_ENDPOINT` for an `otlp` sub-driver, etc.).
+
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `OBSERVABILITY_STACK_DRIVERS` | comma list | _required_ | Sub-drivers in dispatch order, e.g. `stdout,file`. Whitespace tolerated. `stack` may not appear (no nesting). |
+
+If a sub-driver name refers to a heavy driver (`otlp`, `cloudwatch`), the consumer must blank-import that driver package as well.
+
+## Observability — heavy drivers (opt-in)
+
+Heavy drivers require an explicit blank import in consumer code; if you select a heavy driver without importing it the SDK fails fast with `"<name>" not registered`.
+
+### otlp
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/observability/drivers/otlp"
+```
 
 Required when `OBSERVABILITY_DRIVER=otlp`. Names match the OpenTelemetry [environment variable spec](https://opentelemetry.io/docs/specs/otel/protocol/exporter/) so consumers can use any OTLP-aware tooling.
 
@@ -54,24 +70,28 @@ Required when `OBSERVABILITY_DRIVER=otlp`. Names match the OpenTelemetry [enviro
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | enum | `grpc` | `grpc` or `http` (== `http/protobuf`) |
 | `OTEL_EXPORTER_OTLP_INSECURE` | bool | `true` | Skip TLS verification (dev only — set `false` for prod TLS endpoints) |
 
-## Observability — CloudWatch driver (0.4.0+)
+### cloudwatch (stub in 0.4.x, full in 0.5.0)
 
-These are already read by `LoadConfigFromEnv` so consumers can set them today; the driver itself returns an error until 0.3.0.
+```go
+import _ "github.com/godx-jp/godx-platform-framework/observability/drivers/cloudwatch"
+```
+
+Tracked env vars are already accepted by `LoadConfigFromEnv` so consumers can set them today; the driver itself returns `cloudwatch.ErrNotImplemented` until 0.5.0.
 
 | Variable | Type | Default | Purpose |
 |----------|------|---------|---------|
 | `AWS_REGION` | string | _unset_ | AWS region for CloudWatch + X-Ray endpoints |
 | `OBSERVABILITY_CLOUDWATCH_LOG_GROUP` | string | _unset_ (driver derives from `service.name`) | Override CloudWatch log group name |
 
-Standard AWS credential resolution (env, IRSA, EC2 metadata, `~/.aws/credentials`) applies once the 0.4.0 driver lands.
+Standard AWS credential resolution (env, IRSA, EC2 metadata, `~/.aws/credentials`) applies once the 0.5.0 driver lands.
 
 ## HTTP middleware
 
 | Constant | Default | Purpose |
 |----------|---------|---------|
-| `observability.CorrelationHeader` | `X-Correlation-ID` | Header read on requests / written on responses |
+| `middleware.CorrelationHeader` | `X-Correlation-ID` | Header read on requests / written on responses |
 
-Configurable correlation header name is planned for 0.4.0.
+The constant lives in the `observability/middleware` sub-package. Configurable correlation header name is planned for a later release.
 
 ## Defaults summary
 
@@ -94,14 +114,14 @@ Example `.env.example` shipped with a service:
 ```bash
 DEPLOYMENT_ENVIRONMENT=dev
 
-OBSERVABILITY_DRIVER=stdout       # stdout | file | otlp | stack | cloudwatch
+OBSERVABILITY_DRIVER=stdout       # stdout | file | stack | otlp | cloudwatch
 OBSERVABILITY_LOG_LEVEL=info
 OBSERVABILITY_TRACE_SAMPLE_RATE=1.0
 
-# Required when OBSERVABILITY_DRIVER=stack (and set the sub-drivers' own vars too)
+# Required when OBSERVABILITY_DRIVER=stack
 # OBSERVABILITY_STACK_DRIVERS=stdout,file
 
-# Required when OBSERVABILITY_DRIVER=file
+# Required when OBSERVABILITY_DRIVER=file (or used as stack sub-driver)
 # OBSERVABILITY_LOG_FILE_PATH=./logs/app.log
 # OBSERVABILITY_LOG_FILE_ROTATION=daily         # none | daily | size
 # OBSERVABILITY_LOG_FILE_MAX_SIZE_MB=100
@@ -109,12 +129,12 @@ OBSERVABILITY_TRACE_SAMPLE_RATE=1.0
 # OBSERVABILITY_LOG_FILE_MAX_BACKUPS=0
 # OBSERVABILITY_LOG_FILE_COMPRESS=true
 
-# Required when OBSERVABILITY_DRIVER=otlp
-OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
-OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-OTEL_EXPORTER_OTLP_INSECURE=true
+# Required when OBSERVABILITY_DRIVER=otlp (consumer must blank-import drivers/otlp)
+# OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+# OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+# OTEL_EXPORTER_OTLP_INSECURE=true
 
-# Required when OBSERVABILITY_DRIVER=cloudwatch (0.4.0+)
+# Required when OBSERVABILITY_DRIVER=cloudwatch (0.5.0+; blank-import drivers/cloudwatch)
 # AWS_REGION=ap-northeast-1
 # OBSERVABILITY_CLOUDWATCH_LOG_GROUP=/service/my-app
 ```
