@@ -56,7 +56,8 @@ r.Use(middleware.Limit(lim, middleware.ByIP))
 | `Handler(Options) func(http.Handler) http.Handler` | Full control via `Options{Limiter, KeyFunc, RetryAfter}` |
 | `Limit(l, keyFunc) func(http.Handler) http.Handler` | Convenience wrapper, default `RetryAfter` |
 | `LimitWithRetryAfter(l, keyFunc, d) func(http.Handler) http.Handler` | `Limit` with an explicit `Retry-After` duration |
-| `ByIP(*http.Request) string` | Key by client IP (honours first `X-Forwarded-For` hop) |
+| `ByIP(*http.Request) string` | Key by the connection peer (`r.RemoteAddr` host). **Ignores `X-Forwarded-For` / `X-Real-IP`** |
+| `ByForwardedFor(trustedProxies []netip.Prefix) KeyFunc` | Key by the real client from `X-Forwarded-For`, honoured **only** behind a trusted proxy |
 | `ByHeader(name string) KeyFunc` | Key by a request header value |
 | `UserKey(header string) KeyFunc` | `user:<header>`, falls back to `ByIP` when the header is empty |
 | `StringKey(parts ...string) string` | Join key segments with `:` |
@@ -64,6 +65,33 @@ r.Use(middleware.Limit(lim, middleware.ByIP))
 `KeyFunc` is `func(*http.Request) string`. When the resolved key is
 empty the middleware uses the literal `"_"`. `Handler` defaults a nil
 `KeyFunc` to `ByIP` and a non-positive `RetryAfter` to `1s`.
+
+### Client IP: safe by default
+
+`ByIP` keys on the **connection peer** (`r.RemoteAddr`) and deliberately
+ignores the client-supplied `X-Forwarded-For` / `X-Real-IP` headers. Those
+headers are trivially spoofed; honouring them lets an attacker mint a fresh
+rate-limit bucket per forged IP and bypass the limit entirely. `UserKey`
+inherits this safe fallback. Note the same reasoning applies to chi's
+`RealIP` middleware — `httpx.NewRouter` no longer enables it by default.
+
+For deployments **behind a trusted reverse proxy or load balancer**, use
+`ByForwardedFor` with the CIDRs of your own proxies:
+
+```go
+trusted := []netip.Prefix{
+    netip.MustParsePrefix("10.0.0.0/8"),    // internal LB subnet
+    netip.MustParsePrefix("172.16.0.0/12"),
+}
+handler := middleware.Limit(lim, middleware.ByForwardedFor(trusted))(yourHandler)
+```
+
+`ByForwardedFor` honours `X-Forwarded-For` **only** when the connection peer
+is itself within `trustedProxies`; it then walks the chain right-to-left and
+returns the right-most hop that is *not* a trusted proxy — the real client as
+seen by your edge. If the peer is not a trusted proxy, the header is ignored
+and it falls back to the peer address. Never pass an empty/over-broad
+`trustedProxies` at an internet-facing edge — that re-opens the spoofing hole.
 
 ## Drivers
 
