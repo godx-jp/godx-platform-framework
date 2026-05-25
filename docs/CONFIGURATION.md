@@ -104,24 +104,24 @@ Required when `OBSERVABILITY_DRIVER=otlp`. Names match the OpenTelemetry [enviro
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | enum | `grpc` | `grpc` or `http` (== `http/protobuf`) |
 | `OTEL_EXPORTER_OTLP_INSECURE` | bool | `true` | Skip TLS verification (dev only — set `false` for prod TLS endpoints) |
 
-### cloudwatch (stub through v0.6.x, full in v0.7.0)
+### cloudwatch (stub through v0.7.x, full in v0.8.0)
 
 ```go
 import _ "github.com/godx-jp/godx-platform-framework/observability/drivers/cloudwatch"
 ```
 
-Tracked env vars are already accepted by `LoadConfigFromEnv` so consumers can set them today; the driver itself returns `cloudwatch.ErrNotImplemented` until v0.7.0.
+Tracked env vars are already accepted by `LoadConfigFromEnv` so consumers can set them today; the driver itself returns `cloudwatch.ErrNotImplemented` until v0.8.0.
 
 | Variable | Type | Default | Purpose |
 |----------|------|---------|---------|
 | `AWS_REGION` | string | _unset_ | AWS region for CloudWatch + X-Ray endpoints |
 | `OBSERVABILITY_CLOUDWATCH_LOG_GROUP` | string | _unset_ (driver derives from `service.name`) | Override CloudWatch log group name |
 
-Standard AWS credential resolution (env, IRSA, EC2 metadata, `~/.aws/credentials`) applies once the 0.5.0 driver lands.
+Standard AWS credential resolution (env, IRSA, EC2 metadata, `~/.aws/credentials`) applies once the driver lands in v0.8.0.
 
 ## Storage — common
 
-The storage module loads zero or more named disks from the environment. With nothing set, you get a single `local` disk rooted at `./storage` with private visibility — matching Laravel's out-of-the-box `local` disk.
+The storage module loads zero or more named disks from the environment. With nothing set, you get a single `local` disk rooted at `./storage/app/private` with private visibility — matching Laravel's bare-install `local` disk.
 
 | Variable | Type | Default | Purpose |
 |----------|------|---------|---------|
@@ -140,10 +140,10 @@ For each disk `<NAME>` listed in `STORAGE_DISKS`, the module reads env vars pref
 | `STORAGE_DISK_<NAME>_PUBLIC_URL` | string | _unset_ | local + cloud | Base URL for `disk.URL(key)` — e.g. `https://cdn.example.com` |
 | `STORAGE_DISK_<NAME>_BUCKET` | string | _required for cloud_ | s3 · gcs · azure · minio | Bucket / container name |
 | `STORAGE_DISK_<NAME>_REGION` | string | _unset_ | s3 · minio | Cloud region — e.g. `ap-northeast-1` |
-| `STORAGE_DISK_<NAME>_ENDPOINT` | string | _unset_ (AWS default for s3) | s3 · minio | Custom endpoint URL (required for MinIO) |
+| `STORAGE_DISK_<NAME>_ENDPOINT` | string | _unset_ | s3 · minio · gcs · azure | Custom endpoint URL. Required for MinIO. **Required for Azure** (service URL: `https://<account>.blob.core.windows.net`). For GCS, set when targeting an emulator (e.g. `fake-gcs-server`) to switch the client to no-auth mode |
 | `STORAGE_DISK_<NAME>_USE_PATH_STYLE` | bool | `false` (S3) / `true` (MinIO) | s3 · minio | Force path-style addressing |
-| `STORAGE_DISK_<NAME>_ACCESS_KEY` | string | _unset_ (resolved by SDK) | s3 · gcs · azure · minio | Explicit access key — usually leave unset and rely on SDK credential resolution |
-| `STORAGE_DISK_<NAME>_SECRET_KEY` | string | _unset_ | s3 · gcs · azure · minio | Explicit secret key |
+| `STORAGE_DISK_<NAME>_ACCESS_KEY` | string | _unset_ (resolved by SDK) | s3 · minio · azure | Explicit access key. For Azure, this is the **storage account name** (paired with `SECRET_KEY` = account key, required for SAS issuance) |
+| `STORAGE_DISK_<NAME>_SECRET_KEY` | string | _unset_ | s3 · minio · azure | Explicit secret key. For Azure, the **storage account key** |
 | `STORAGE_DISK_<NAME>_SESSION_TOKEN` | string | _unset_ | s3 | AWS STS session token |
 
 ## Storage — heavy drivers (opt-in)
@@ -155,12 +155,12 @@ import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/s3"
 import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/minio"
 ```
 
-| Driver | Status (v0.6.1) | Required env keys | Notes |
+| Driver | Status (v0.6.2) | Required env keys | Notes |
 |--------|-----------------|--------------------|-------|
 | `s3`   | **stable** | `BUCKET`, `REGION` | Credentials via default AWS chain (env → `~/.aws/credentials` → IRSA → EC2 IMDS); override with `ACCESS_KEY` / `SECRET_KEY` |
 | `minio` | **stable** | `BUCKET`, `ENDPOINT` | Always path-style; `REGION` defaults to `us-east-1`; supply credentials via `ACCESS_KEY` / `SECRET_KEY` |
-| `gcs`  | stub (full impl in a v0.6.x patch) | `BUCKET` | Returns `driver.ErrNotImplemented` until the full driver lands |
-| `azure` | stub (full impl in a v0.6.x patch) | `BUCKET` | Returns `driver.ErrNotImplemented` until the full driver lands |
+| `gcs`  | **stable** | `BUCKET` | Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS`, `gcloud auth application-default login`, Workload Identity). Setting `ENDPOINT` switches to emulator mode (`fake-gcs-server`). `SignedURL` requires a service-account JSON key |
+| `azure` | **stable** | `BUCKET` (container), `ENDPOINT` (service URL) | Shared-key auth (`ACCESS_KEY` = account name + `SECRET_KEY` = account key) is the preferred mode — only that combination can issue SAS via `TemporaryURL`. Without it, the driver falls back to `DefaultAzureCredential` |
 
 ## HTTP middleware
 

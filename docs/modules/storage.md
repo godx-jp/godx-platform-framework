@@ -154,8 +154,8 @@ disk.Put(ctx, "report.pdf", body,
 | `memory` | stable | auto | In-memory map; `Shutdown` clears all objects. Ideal for tests |
 | `s3` | **stable (v0.6.1)** | opt-in (`_ "...drivers/s3"`) | AWS S3 via `aws-sdk-go-v2` — multipart streaming, presigned URLs, default credential chain |
 | `minio` | **stable (v0.6.1)** | opt-in (`_ "...drivers/minio"`) | MinIO / S3-compatible (R2, DO Spaces) — shares impl with `s3`; defaults `UsePathStyle=true`, requires `ENDPOINT` |
-| `gcs` | stub | opt-in (`_ "...drivers/gcs"`) | Google Cloud Storage — full impl lands in a v0.6.x patch |
-| `azure` | stub | opt-in (`_ "...drivers/azure"`) | Azure Blob Storage — full impl lands in a v0.6.x patch |
+| `gcs` | **stable (v0.6.2)** | opt-in (`_ "...drivers/gcs"`) | Google Cloud Storage via `cloud.google.com/go/storage` — resumable streaming, V4 signed URLs, UBLA-safe visibility, Application Default Credentials |
+| `azure` | **stable (v0.6.2)** | opt-in (`_ "...drivers/azure"`) | Azure Blob Storage via `azure-sdk-for-go/sdk/storage/azblob` — block-blob streaming, shared-key SAS, hierarchical list, DefaultAzureCredential fallback |
 
 **Light** drivers (`local`, `memory`) are auto-registered when you `import "...storage"`.
 
@@ -234,6 +234,80 @@ docker stop minio-dev
 
 The test does a full round trip: write a small object, head it, read it back, request a presigned URL, delete it, then verify a second delete returns `ErrNotFound`.
 
+### GCS driver (Google Cloud Storage)
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/gcs"
+```
+
+```bash
+STORAGE_DEFAULT_DISK=archive
+STORAGE_DISKS=archive
+STORAGE_DISK_ARCHIVE_DRIVER=gcs
+STORAGE_DISK_ARCHIVE_BUCKET=my-bucket
+# Credentials resolve via Application Default Credentials —
+# GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json, or `gcloud auth
+# application-default login`, or Workload Identity on GKE/GCE.
+# STORAGE_DISK_ARCHIVE_PUBLIC_URL=https://storage.googleapis.com/my-bucket
+# STORAGE_DISK_ARCHIVE_ENDPOINT=http://127.0.0.1:4443/storage/v1/  # for fake-gcs-server
+```
+
+Notes:
+
+- Writes use the SDK's native resumable upload writer — arbitrary object sizes stream without buffering.
+- `TemporaryURL` issues a V4 signed GET via `Bucket.SignedURL`. Service-account JSON-key credentials are required; metadata-server creds cannot sign locally (returns `driver.ErrNotSupported` with a diagnostic).
+- The driver only sets `PredefinedACL` when an explicit visibility is supplied — UBLA buckets (the GCS default for new buckets) therefore work transparently. Public exposure on UBLA buckets is configured at bucket level via IAM.
+- Live integration test against `fsouza/fake-gcs-server`:
+
+  ```bash
+  docker run --rm -d --name fakegcs -p 4443:4443 \
+      fsouza/fake-gcs-server -scheme http -public-host 127.0.0.1:4443
+  curl -X POST -H 'Content-Type: application/json' \
+      --data '{"name":"godx-test"}' http://127.0.0.1:4443/storage/v1/b
+  go test -tags integration -run TestGCS_Integration_FakeServer \
+      ./storage/drivers/gcs/
+  docker stop fakegcs
+  ```
+
+### Azure driver (Azure Blob Storage)
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/azure"
+```
+
+```bash
+STORAGE_DEFAULT_DISK=backup
+STORAGE_DISKS=backup
+STORAGE_DISK_BACKUP_DRIVER=azure
+STORAGE_DISK_BACKUP_ENDPOINT=https://myaccount.blob.core.windows.net
+STORAGE_DISK_BACKUP_BUCKET=my-container
+# Shared-key auth (preferred — required for SAS issuance):
+STORAGE_DISK_BACKUP_ACCESS_KEY=myaccount       # storage account name
+STORAGE_DISK_BACKUP_SECRET_KEY=<base64-key>    # storage account key
+# Or rely on DefaultAzureCredential (AZURE_* env / managed identity / az
+# login). Without shared-key, TemporaryURL returns driver.ErrNotSupported.
+# STORAGE_DISK_BACKUP_PUBLIC_URL=https://myaccount.blob.core.windows.net/my-container
+```
+
+Notes:
+
+- Spec mapping for Azure terminology: `Bucket` = container, `Endpoint` = the storage account service URL, `AccessKey` = storage account name, `SecretKey` = storage account key.
+- Writes pipe through `Client.UploadStream` so arbitrary sizes stream.
+- Per-write `Visibility` is intentionally ignored — Azure scopes public/private at the container level. Configure container access via the Azure portal or `az storage container set-permission`, then provide `PUBLIC_URL` so `disk.URL()` works.
+- `TemporaryURL` issues a read-only SAS with V4 protocol enforced. The driver must have been constructed with shared-key credentials (`ACCESS_KEY` + `SECRET_KEY`); user-delegation SAS via OAuth is out of scope for `v0.6.x`.
+- Live integration test against Microsoft's Azurite emulator:
+
+  ```bash
+  docker run --rm -d --name azurite -p 10000:10000 \
+      mcr.microsoft.com/azure-storage/azurite \
+      azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+  go test -tags integration -run TestAzure_Integration_Azurite \
+      ./storage/drivers/azure/
+  docker stop azurite
+  ```
+
+  `--skipApiVersionCheck` is needed because the SDK pins a newer API version than Azurite's default. The test bootstraps its own container.
+
 ## Error model
 
 All driver errors are wrapped with stable sentinels — test with `errors.Is`:
@@ -243,7 +317,7 @@ body, err := disk.Get(ctx, "missing.txt")
 switch {
 case errors.Is(err, driver.ErrNotFound):       // 404-style
 case errors.Is(err, driver.ErrNotSupported):    // capability gap (e.g. local SignedURL)
-case errors.Is(err, driver.ErrNotImplemented):  // heavy driver stub before v0.6.x
+case errors.Is(err, driver.ErrNotImplemented):  // unreachable in v0.6.2+; was used by heavy stubs
 case err != nil:                                // unexpected
 default:                                        // success
 }

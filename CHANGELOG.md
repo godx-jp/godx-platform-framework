@@ -4,6 +4,58 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-05-25
+
+Heavy storage drivers, round 2 — Google Cloud Storage and Azure Blob Storage now ship as real implementations. With this release the storage matrix is complete (six drivers: `local`, `memory`, `s3`, `minio`, `gcs`, `azure`) and `v0.6.x` closes.
+
+### Added — `gcs` driver (full implementation)
+
+- **`storage/drivers/gcs`** — Google Cloud Storage backend on `cloud.google.com/go/storage`. Implements every `storage.Driver` method:
+  - `NewReader` / `NewWriter` — uses the SDK's native resumable upload writer, so writes of arbitrary size stream without buffering. Forwards ContentType, CacheControl, and user metadata when supplied.
+  - `Delete` — surfaces `gcs.ErrObjectNotExist` as `driver.ErrNotFound` so the manager and stack drivers can react consistently.
+  - `Exists` / `Attributes` — single `Attrs` round trip; returns Size, Updated (LastModified), ContentType, ETag, and Metadata.
+  - `List` — paginated `Objects` walk with `Delimiter="/"`, emitting files plus synthetic directory entries from CommonPrefixes. Matches the local/s3 list semantics.
+  - `URL` — concatenates `Spec.PublicURL` + the URL-escaped key.
+  - `SignedURL` — V4 signed GET via the SDK's `Bucket.SignedURL`; default expiry 15 minutes. Surfaces `driver.ErrNotSupported` with a helpful diagnostic when the resolved credential cannot sign locally (metadata-server creds need IAM SignBlob, which is out of scope for `v0.6.x`).
+- **UBLA-safe visibility** — the driver only sets `PredefinedACL` when the caller explicitly requests a visibility. Uniform Bucket-Level Access buckets (the default for new GCS buckets) therefore work transparently; callers needing public exposure either disable UBLA or grant bucket-level IAM.
+- **Credentials** — Application Default Credentials chain (env `GOOGLE_APPLICATION_CREDENTIALS`, `gcloud auth application-default login`, Workload Identity / GKE / GCE). Supplying `Spec.Endpoint` switches to no-auth mode for `fake-gcs-server` and other emulators.
+
+### Added — `azure` driver (full implementation)
+
+- **`storage/drivers/azure`** — Azure Blob Storage backend on `github.com/Azure/azure-sdk-for-go/sdk/storage/azblob`. Implements every `storage.Driver` method:
+  - `NewReader` / `NewWriter` — writer pipes into `Client.UploadStream`, so arbitrary-size writes stream as a block-blob upload without buffering. Forwards ContentType, CacheControl, and metadata.
+  - `Delete` — translates `bloberror.BlobNotFound` / `ContainerNotFound` / `ResourceNotFound` to `driver.ErrNotFound`.
+  - `Exists` / `Attributes` — `GetProperties` round trip; returns Size, LastModified, ContentType, ETag, and metadata.
+  - `List` — `NewListBlobsHierarchyPager` with `Delimiter="/"`, paginating files plus synthetic directory entries from BlobPrefixes.
+  - `URL` — concatenates `Spec.PublicURL` + the URL-escaped key. Azure scopes visibility at container level, so per-write Visibility flags are intentionally ignored (set container access via portal / `az`).
+  - `SignedURL` — Shared Access Signature (SAS) with V2 protocol and Read permission, signed locally with the shared-key credential. Returns `driver.ErrNotSupported` when the driver was constructed with `DefaultAzureCredential` (OAuth user-delegation SAS is out of scope for `v0.6.x`).
+- **Credentials** — `Spec.AccessKey` + `Spec.SecretKey` map to Azure's storage-account name and key (shared-key auth, required for SAS issuance). Without them the driver falls back to `DefaultAzureCredential` (AZURE_* env, managed identity, `az login`).
+- **Spec mapping** — Azure terminology mapped to the generic `driver.Spec`: `Bucket` = container, `Endpoint` = service URL (`https://<account>.blob.core.windows.net`), `AccessKey`/`SecretKey` = account name/key.
+
+### Tests
+
+- **Wrapper unit tests** — both drivers ship registration + required-field validation tests that run in the standard `go test` pass (no docker, no network).
+- **Live integration tests** behind `//go:build integration`:
+  - `TestGCS_Integration_FakeServer` — verifies the gcs driver end-to-end against `fsouza/fake-gcs-server`. Boots the emulator, writes/reads/deletes a blob, and confirms `Delete` of a missing key returns `ErrNotFound`. Boot instructions in the test file header. Verified live.
+  - `TestAzure_Integration_Azurite` — verifies the azure driver end-to-end against Microsoft's Azurite emulator. Self-bootstraps the container if missing, writes/reads/inspects/SAS-signs/deletes a blob, and confirms `Delete` of a missing key returns `ErrNotFound`. Verified live (azurite must run with `--skipApiVersionCheck` because the SDK's API version is newer than Azurite's pinned default).
+
+### Storage matrix (v0.6.2)
+
+| Driver | Status | Notes |
+|---|---|---|
+| `local` | stable | Filesystem; defaults to `./storage/app/private`. |
+| `memory` | stable | In-process; useful for tests. |
+| `s3` | stable (heavy) | AWS S3 via `s3core` + ProfileAWS. |
+| `minio` | stable (heavy) | MinIO / R2 / Spaces / B2 via `s3core` + ProfileMinIO. |
+| `gcs` | **stable (heavy, v0.6.2)** | Google Cloud Storage. |
+| `azure` | **stable (heavy, v0.6.2)** | Azure Blob Storage. |
+
+### Roadmap
+
+- `v0.6.x` storage track closes here.
+- `v0.7.x` ships the **`cache` module** (Laravel-faithful), with `memory` + `file` + `redis` drivers — by explicit user direction, DB-backed cache is out of scope.
+- `v0.8.x` resumes the observability track with the CloudWatch driver.
+
 ## [0.6.1] — 2026-05-25
 
 Heavy storage drivers, round 1 — AWS S3 and MinIO (any S3-compatible store) now ship as real, production-grade implementations instead of stubs. Backward-compatible for v0.6.0 consumers that did not yet rely on the stubbed heavy drivers; the only behaviour change is the Laravel-faithful local-disk default root.

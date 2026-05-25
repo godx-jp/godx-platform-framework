@@ -41,7 +41,7 @@ godx-platform-framework/
 │       ├── local/ · memory/            (light — auto-registered)
 │       ├── internal/s3core/            shared S3 protocol impl (used by s3 + minio)
 │       ├── s3/ · minio/                (heavy — opt-in; stable v0.6.1)
-│       └── gcs/ · azure/               (heavy — opt-in; stubs until v0.6.x patches)
+│       └── gcs/ · azure/               (heavy — opt-in; stable v0.6.2)
 │
 ├── cache/                              Future — same skeleton (driver/, drivers/memory|redis/, ...)
 ├── queue/                              Future
@@ -184,9 +184,9 @@ The same pattern repeats for every future module — see [DRIVER_PATTERN](./DRIV
 | 0.3.x | multi-channel | `stack` driver (Laravel fan-out), named channels (`obs.Channel("audit")`) |
 | 0.4.x | layout standardisation | per-driver subpackages, `<module>/driver` registry, `<module>/middleware` sub-package, opt-in heavy drivers |
 | 0.5.x | channel maturity | per-channel level filter, env-driven channels (`ChannelsFromEnv()`), per-sub stack level (`stdout:info,file:warn`) — Laravel `config/logging.php` parity |
-| 0.6.x | **`storage` module** | Laravel `Storage` parity — Manager, named Disks. v0.6.0: local + memory; **v0.6.1: s3 + minio (real, via shared internal/s3core)**; remaining gcs + azure across later 0.6.x patches |
-| 0.7.x | `cloudwatch` driver | AWS ADOT exporters; configurable correlation header |
-| 0.8.x | `cache` module | drivers: memory · redis · memcached |
+| 0.6.x | **`storage` module — complete** | Laravel `Storage` parity. v0.6.0: local + memory · v0.6.1: s3 + minio (shared `internal/s3core`) · **v0.6.2: gcs + azure**. All six drivers stable; module closes at 0.6.2 |
+| 0.7.x | **`cache` module** | Laravel `Cache` parity — Manager + Store (memory · file · redis). DB-backed cache intentionally out of scope |
+| 0.8.x | `cloudwatch` driver | AWS ADOT exporters; configurable correlation header |
 | 0.9.x | `queue` module | drivers: in-memory · sqs · kafka · nats |
 | 0.10.x | `httpx` module | chi router + handler conventions |
 | 1.0.0 | API freeze | SemVer guarantees for `1.x` |
