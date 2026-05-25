@@ -132,8 +132,10 @@ Use for any environment with an OTel-compatible receiver (godx-platform-observab
 |---------|---------|---------|
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _required_ | `host:port` (no scheme), e.g. `otel-collector:4317` |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | `grpc` or `http` (== `http/protobuf`) |
-| `OTEL_EXPORTER_OTLP_INSECURE` | `true` | Skip TLS verification (dev only) |
+| `OTEL_EXPORTER_OTLP_INSECURE` | `false` | Disable TLS (cleartext export). Secure by default — set `true` **only** for local dev against a non-TLS collector |
 | `OBSERVABILITY_TRACE_SAMPLE_RATE` | `1.0` | Sample rate in `[0..1]` |
+
+> **Security — TLS is on by default.** The OTLP exporter uses TLS unless `OTEL_EXPORTER_OTLP_INSECURE=true` is set explicitly. Leaving it secure prevents telemetry (which can carry request paths, headers, and other sensitive attributes) from crossing the network in cleartext. Only set `INSECURE=true` for a local collector on `localhost`/loopback during development.
 
 Logs are written to stdout (JSON) and are expected to be picked up out-of-process (Promtail / Fluent Bit / OTel Collector filelog receiver). This matches the standard container-log workflow and avoids dragging a third exporter into the binary.
 

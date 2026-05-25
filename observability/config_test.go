@@ -41,8 +41,8 @@ func TestLoadConfigFromEnv_Defaults(t *testing.T) {
 	if cfg.OTLPProtocol != "grpc" {
 		t.Errorf("OTLPProtocol = %q, want grpc", cfg.OTLPProtocol)
 	}
-	if !cfg.OTLPInsecure {
-		t.Errorf("OTLPInsecure = false, want true (default)")
+	if cfg.OTLPInsecure {
+		t.Errorf("OTLPInsecure = true, want false (secure by default)")
 	}
 	if cfg.LogFileRotation != "daily" || cfg.LogFileMaxSizeMB != 100 ||
 		cfg.LogFileMaxAgeDays != 14 || !cfg.LogFileCompress {
@@ -57,14 +57,14 @@ func TestLoadConfigFromEnv_OverrideAll(t *testing.T) {
 	t.Setenv("DEPLOYMENT_ENVIRONMENT", "prod")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel:4317")
 	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http")
-	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "false")
+	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "true")
 	t.Setenv("AWS_REGION", "ap-northeast-1")
 	t.Setenv("OBSERVABILITY_CLOUDWATCH_LOG_GROUP", "/svc/my-app")
 
 	cfg := observability.LoadConfigFromEnv()
 	if cfg.Driver != "otlp" || cfg.LogLevel != slog.LevelWarn || cfg.TraceSampleRate != 0.25 ||
 		cfg.Environment != "prod" || cfg.OTLPEndpoint != "otel:4317" ||
-		cfg.OTLPProtocol != "http" || cfg.OTLPInsecure || cfg.AWSRegion != "ap-northeast-1" ||
+		cfg.OTLPProtocol != "http" || !cfg.OTLPInsecure || cfg.AWSRegion != "ap-northeast-1" ||
 		cfg.CloudWatchLogGroup != "/svc/my-app" {
 		t.Fatalf("override mismatch: %+v", cfg)
 	}

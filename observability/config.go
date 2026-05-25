@@ -20,7 +20,7 @@ const (
 	DriverFile       = "file"       // local file with optional rotation; bare-metal / VM (auto-registered)
 	DriverStack      = "stack"      // fan-out: every log record goes to N sub-drivers — Laravel `stack` channel (auto-registered)
 	DriverOTLP       = "otlp"       // OTLP gRPC/HTTP; godx-platform-observability, Datadog, New Relic — opt-in (blank import drivers/otlp)
-	DriverCloudWatch = "cloudwatch" // AWS CloudWatch Logs/Metrics + X-Ray — opt-in (blank import drivers/cloudwatch); stub in 0.4.x–0.5.x, full in 0.6.0
+	DriverCloudWatch = "cloudwatch" // AWS CloudWatch Logs + in-process traces — opt-in (blank import drivers/cloudwatch); fully implemented
 )
 
 // Config controls observability bootstrap. The framework module loads it
@@ -49,7 +49,9 @@ type Config struct {
 	OTLPEndpoint string
 	// OTLPProtocol is "grpc" or "http". Defaults to "grpc".
 	OTLPProtocol string
-	// OTLPInsecure skips TLS verification (dev only).
+	// OTLPInsecure disables TLS for the OTLP exporter (cleartext export).
+	// Defaults to false (TLS-secure); set OTEL_EXPORTER_OTLP_INSECURE=true
+	// only for local development against a non-TLS collector.
 	OTLPInsecure bool
 
 	// CloudWatch-only fields. Reserved for the 0.5.0 cloudwatch driver.
@@ -81,7 +83,7 @@ type Config struct {
 //	DEPLOYMENT_ENVIRONMENT                dev
 //	OTEL_EXPORTER_OTLP_ENDPOINT           (empty)
 //	OTEL_EXPORTER_OTLP_PROTOCOL           grpc
-//	OTEL_EXPORTER_OTLP_INSECURE           true
+//	OTEL_EXPORTER_OTLP_INSECURE           false
 //	AWS_REGION                            (empty)
 //	OBSERVABILITY_CLOUDWATCH_LOG_GROUP    (empty)
 //	OBSERVABILITY_LOG_FILE_PATH           (empty)
@@ -102,7 +104,7 @@ func LoadConfigFromEnv() Config {
 		Environment:        getEnv("DEPLOYMENT_ENVIRONMENT", "dev"),
 		OTLPEndpoint:       getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		OTLPProtocol:       getEnv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"),
-		OTLPInsecure:       parseBool(getEnv("OTEL_EXPORTER_OTLP_INSECURE", "true"), true),
+		OTLPInsecure:       parseBool(getEnv("OTEL_EXPORTER_OTLP_INSECURE", "false"), false),
 		AWSRegion:          os.Getenv("AWS_REGION"),
 		CloudWatchLogGroup: os.Getenv("OBSERVABILITY_CLOUDWATCH_LOG_GROUP"),
 		LogFilePath:        os.Getenv("OBSERVABILITY_LOG_FILE_PATH"),
