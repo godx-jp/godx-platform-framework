@@ -282,6 +282,29 @@ _ = mgr.SetResolver("service", auth.BearerTokenResolver())
 
 Custom JWT claims land in `Principal.Claims`. Read them with `auth.ClaimString(p, "tenant_id")` or map access.
 
+### Token lifetime validation
+
+The `hmac` guard hardens its time-claim checks so a malformed or non-expiring token cannot slip through:
+
+- **`exp` is mandatory.** A token without an `exp` claim is rejected (the parser runs with `WithExpirationRequired`). An `exp` that is present but not a number — e.g. string-encoded — is treated as **invalid**, never as "absent".
+- **`nbf` is honoured.** If a `nbf` (not-before) claim is present and lies in the future beyond the configured leeway, the token is rejected — mirroring the existing `iat` leeway check.
+- **`MaxTokenTTL` is enforced.** When the guard's `Spec.MaxTokenTTL` is greater than zero and `exp − iat` exceeds it, the token is rejected even if it is otherwise unexpired. Set it to cap how long any single token may live:
+
+```bash
+AUTH_GUARD_SERVICE_LEEWAY_SECONDS=30
+```
+
+```go
+g, _ := driver.New(ctx, driver.Spec{
+    Name:        driver.DriverHMAC,
+    Secret:      os.Getenv("INTER_SERVICE_SECRET"),
+    Audience:    "orders-service",
+    MaxTokenTTL: 5 * time.Minute, // reject tokens minted with a longer lifetime
+})
+```
+
+All of these failures surface as `driver.ErrInvalidCredential`, i.e. **401** through the middleware.
+
 Dev/test token minting (not for production hot paths):
 
 ```go

@@ -44,6 +44,7 @@ func init() {
 			issuer:           strings.TrimSpace(spec.Issuer),
 			audience:         strings.TrimSpace(spec.Audience),
 			leewaySeconds:    leeway,
+			maxTokenTTL:      spec.MaxTokenTTL,
 			subjectClaim:     subjectClaim,
 			rolesClaim:       rolesClaim,
 			permissionsClaim: permsClaim,
@@ -57,6 +58,7 @@ type guard struct {
 	issuer           string
 	audience         string
 	leewaySeconds    int64
+	maxTokenTTL      time.Duration
 	subjectClaim     string
 	rolesClaim       string
 	permissionsClaim string
@@ -120,7 +122,7 @@ func (g *guard) parseToken(tokenStr string) (jwtlib.MapClaims, error) {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
 		return g.secret, nil
-	}, jwtlib.WithValidMethods([]string{"HS256"}))
+	}, jwtlib.WithValidMethods([]string{"HS256"}), jwtlib.WithExpirationRequired())
 	if err != nil {
 		return nil, err
 	}
@@ -133,17 +135,74 @@ func (g *guard) parseToken(tokenStr string) (jwtlib.MapClaims, error) {
 
 func (g *guard) validateTimeClaims(mc jwtlib.MapClaims, now time.Time) error {
 	leeway := g.leewaySeconds
-	if iat, ok := numericClaim(mc, "iat"); ok {
+
+	var iat int64
+	iatPresent := false
+	if v, status := timeClaim(mc, "iat"); status == claimInvalid {
+		return adriver.ErrInvalidCredential
+	} else if status == claimPresent {
+		iat = v
+		iatPresent = true
 		if iat > now.Unix()+leeway {
 			return adriver.ErrInvalidCredential
 		}
 	}
-	if exp, ok := numericClaim(mc, "exp"); ok {
-		if exp < now.Unix()-leeway {
+
+	// nbf: if present, the token is not yet valid until nbf (minus leeway).
+	if v, status := timeClaim(mc, "nbf"); status == claimInvalid {
+		return adriver.ErrInvalidCredential
+	} else if status == claimPresent {
+		if v > now.Unix()+leeway {
+			return adriver.ErrInvalidCredential
+		}
+	}
+
+	// exp is mandatory: absent or unparseable both reject. (jwtlib's
+	// WithExpirationRequired already rejects absent exp, but enforce it here
+	// too so a string-encoded exp is treated as invalid, not as "absent".)
+	exp, status := timeClaim(mc, "exp")
+	if status != claimPresent {
+		return adriver.ErrInvalidCredential
+	}
+	if exp < now.Unix()-leeway {
+		return adriver.ErrInvalidCredential
+	}
+
+	// Enforce a maximum lifetime: reject tokens minted with an over-long TTL.
+	if g.maxTokenTTL > 0 && iatPresent {
+		if exp-iat > int64(g.maxTokenTTL.Seconds()) {
 			return adriver.ErrInvalidCredential
 		}
 	}
 	return nil
+}
+
+type claimStatus int
+
+const (
+	claimAbsent claimStatus = iota
+	claimPresent
+	claimInvalid
+)
+
+// timeClaim distinguishes an absent numeric time claim from one that is present
+// but cannot be parsed (e.g. string-encoded), which must be treated as invalid
+// rather than silently skipped.
+func timeClaim(claims jwtlib.MapClaims, key string) (int64, claimStatus) {
+	v, ok := claims[key]
+	if !ok {
+		return 0, claimAbsent
+	}
+	switch t := v.(type) {
+	case float64:
+		return int64(t), claimPresent
+	case int64:
+		return t, claimPresent
+	case int:
+		return int64(t), claimPresent
+	default:
+		return 0, claimInvalid
+	}
 }
 
 func (g *guard) Shutdown(context.Context) error {
@@ -193,21 +252,6 @@ func stringSliceClaim(claims jwtlib.MapClaims, key string) []string {
 		}
 	}
 	return nil
-}
-
-func numericClaim(claims jwtlib.MapClaims, key string) (int64, bool) {
-	v, ok := claims[key]
-	if !ok {
-		return 0, false
-	}
-	switch t := v.(type) {
-	case float64:
-		return int64(t), true
-	case int64:
-		return t, true
-	default:
-		return 0, false
-	}
 }
 
 func audienceContains(claims jwtlib.MapClaims, want string) bool {
