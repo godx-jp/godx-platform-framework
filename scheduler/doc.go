@@ -1,13 +1,14 @@
 // Package scheduler runs recurring jobs from cron expressions — Laravel
 // Schedule parity for Go services.
 //
-//	sched := scheduler.New()
+//	sched := scheduler.New(scheduler.Options{})
 //	sched.EveryMinute().Do("heartbeat", func(ctx context.Context) error {
 //	    return ping(ctx)
 //	})
-//	sched.Cron("0 2 * * *").WithoutOverlapping().OnOneServer().Do("nightly", nightly)
+//	// Six-field cron (seconds first): 02:00 every day.
+//	sched.Cron("0 0 2 * * *").WithoutOverlapping().OnOneServer().Do("nightly", nightly)
 //	sched.Start(ctx)
-//	defer sched.Stop()
+//	defer sched.Stop(ctx)
 //
 // WithoutOverlapping uses an in-process mutex so a slow run cannot stack
 // on top of itself. OnOneServer acquires a distributed lock through

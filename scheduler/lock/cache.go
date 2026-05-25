@@ -3,6 +3,7 @@ package lock
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -50,9 +51,21 @@ func NewCache(opts CacheOptions) (*Cache, error) {
 }
 
 // TryAcquire attempts Add on prefix+key. ok is false when another holder exists.
+//
+// Each call stores a unique per-acquisition token (owner + random suffix), not
+// the bare configured owner, so two replicas that share the same Owner never
+// produce the same lock value. Renew is value-checked against this exact
+// token, so a holder that has lost the lock cannot re-extend one another
+// replica now owns.
 func (c *Cache) TryAcquire(ctx context.Context, key string) (func() error, bool, error) {
 	lockKey := c.prefix + key
-	added, err := c.store.Add(ctx, lockKey, c.owner, c.ttl)
+	suffix, err := randomToken()
+	if err != nil {
+		return nil, false, fmt.Errorf("scheduler/lock: generate lock token: %w", err)
+	}
+	token := append(append([]byte(nil), c.owner...), ':')
+	token = append(token, suffix...)
+	added, err := c.store.Add(ctx, lockKey, token, c.ttl)
 	if err != nil {
 		return nil, false, err
 	}
@@ -79,7 +92,18 @@ func (c *Cache) TryAcquire(ctx context.Context, key string) (func() error, bool,
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					_ = renewer.Renew(context.Background(), lockKey, c.owner, c.ttl)
+					// SECURITY: a renew error means the lock was lost (TTL
+					// expired or another replica took it over via a
+					// value-checked Renew) while the job is still running, so
+					// the OnOneServer guarantee is temporarily broken. We log
+					// it for operators rather than silently dropping it.
+					// Cancelling the in-flight job would require threading a
+					// cancel signal through scheduler.runJob; until that is
+					// wired the residual risk is surfaced here.
+					if err := renewer.Renew(context.Background(), lockKey, token, c.ttl); err != nil {
+						slog.Warn("scheduler/lock: cache lock renew failed; lock may expire mid-job, OnOneServer no longer guaranteed",
+							"key", lockKey, "error", err)
+					}
 				}
 			}
 		}()

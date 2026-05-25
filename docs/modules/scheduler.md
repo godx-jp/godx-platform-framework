@@ -129,11 +129,47 @@ type RenewableStore interface {
 
 `lock.Cache` and `lock.Redis` both run a background renewal loop
 (interval = `TTL/3`, floored at 1s) that re-extends the lock while the
-job runs; the `release` callback stops the loop and deletes the key.
+job runs; the `release` callback stops the loop and releases the key.
 `lock.Cache` only renews when its store implements `RenewableStore`.
 `lock.NewRedisStore(client)` adapts a `*redis.Client` to
 `CacheStore`/`RenewableStore` so it can be passed to
 `scheduler.ModuleWithConfig`.
+
+#### Per-acquisition token (ownership safety)
+
+Every `TryAcquire` call stores a **unique per-acquisition token**
+(`Owner` + a `crypto/rand` random suffix), not the bare configured
+`Owner`. Two replicas that share the same `Owner` therefore never share
+an effective lock value. This makes release and renewal **owner-checked**:
+
+- **`lock.Redis` release** is a compare-and-delete Lua script
+  (`if GET(key) == token then DEL(key)`), so a replica only ever deletes
+  the lock it actually holds. If replica A's lock expires under load and
+  replica B acquires it, A's release no longer deletes B's lock — closing
+  the lock-theft / accidental-release race that previously let an
+  `OnOneServer` job run concurrently.
+- **Renewal** (both adapters) is value-checked against the same captured
+  token, so a holder that has already lost the lock can never re-extend
+  or resurrect one another replica now owns.
+- **`RedisStore.Forget`** (the `CacheStore` adapter path used by
+  `scheduler.ModuleWithConfig`) remains an unconditional `DEL`, because
+  the `CacheStore.Forget(ctx, key)` contract — shared with the cache
+  module's `Store` — carries no token argument. The residual race on that
+  path is bounded by value-checked `Renew` plus the per-acquisition token;
+  callers needing strict compare-and-delete on release should use the
+  direct `lock.Redis` lock (`NewRedis`).
+
+#### Renewal-failure behavior
+
+When a renewal returns an error or a result indicating the key was lost
+(expired or taken over by another replica), the lock no longer holds even
+though the job is still running, so the `OnOneServer` guarantee is
+temporarily broken. Both adapters now **log a warning via `log/slog`**
+(rather than silently discarding the result) so operators can detect and
+alert on it. The in-flight job is **not** cancelled — wiring a cancel
+signal through `runJob` is a deliberate follow-up; the current behavior is
+detect-and-log, documented inline with `// SECURITY:` comments in the
+lock code.
 
 ### Wiring `OnOneServer` via the module
 
