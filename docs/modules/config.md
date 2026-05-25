@@ -139,6 +139,29 @@ mgr.OnChange(func(r *config.Repository) {
 | `CONFIG_SOURCE_<NAME>_ADDRESS` | Remote source `host:port` | _empty_ |
 | `CONFIG_SOURCE_<NAME>_TOKEN` | Remote source auth token | _empty_ |
 
+## Error model
+
+Typed accessors never error — a missing or wrong-typed key returns the supplied default, so handlers stay branch-free. Errors surface only during wiring:
+
+- `Config.Validate()` fails when there are no sources **and** `AutoEnv` is disabled, or a source omits its driver/name (file sources also require `PATH`).
+- `Manager.Reload` attempts every source and returns the **first** load error while still merging the sources that succeeded — one bad source does not poison the chain. The file driver wraps `driver.ErrFileMissing` (when not `Optional`) and `driver.ErrUnsupportedFormat`.
+- After `Shutdown`, `AddSource` and `Reload` return `driver.ErrClosed`.
+
+```go
+mgr, _ := config.ManagerFromApp(app)
+if err := mgr.Reload(ctx); err != nil {
+    // first failing source; the merged Repository still reflects the rest
+}
+```
+
+## Context propagation
+
+`config.ContextWithManager(ctx, mgr)` attaches a manager to a context; `config.FromContext(ctx)` reads it back. `config.FromApp(app)` returns the merged `*Repository` (the common case); `config.ManagerFromApp(app)` returns the `*Manager` itself when you need to `Reload`, `OnChange`, or `AddSource` after `Init`.
+
+## Lifecycle
+
+`config.Module` registers an `OnShutdown` callback that calls `Manager.Shutdown`, which stops every source (file watchers, remote connections). The `Repository` pointer returned by `FromApp` is stable for the manager's lifetime — its data is swapped in place on reload — so callers may cache it. Only one `config.Module` per `App`; a second `Init` returns `config: Module already initialised`.
+
 ## Laravel API mapping
 
 | Laravel | Framework |
@@ -150,20 +173,8 @@ mgr.OnChange(func(r *config.Repository) {
 | `Config::all()` | `repo.All()` / `repo.AllFlat()` |
 | `Artisan config:cache` | `repo.AllFlat()` — emit to JSON for boot-time caching |
 
-## Migrating from go-common
-
-`umbrella/packages/go-common` exposes ad-hoc env wrappers (per-service helpers). Replace each call site:
-
-| Before | After |
-|---|---|
-| `os.Getenv("HTTP_PORT")` with default | `cfg.GetString("http.port", "8080")` after setting `CONFIG_ENV_PREFIX=` to capture `HTTP_*` |
-| Per-service Viper / koanf wrappers | `config.Module` with one or more file sources |
-| Hand-rolled `.env` loader | Drop the loader, set `CONFIG_AUTO_ENV=true` (default) |
-
-No big-bang rewrite — services can adopt the config module incrementally; the env source covers existing `MYAPP_FOO=bar` conventions out of the box.
-
 ## Out of scope
 
 - **Schema validation** — handled by the upcoming `validation` module (`v0.9.0`). The Repository stays untyped on purpose so the same tree feeds many typed views.
 - **Secrets handling** — handled by the upcoming `secrets` module (`v0.8.5`). Treat the config tree as non-secret by default.
-- **Config encryption** — handled by the upcoming `encryption` module (`v0.8.3`). Sources can decrypt on Load if they want, but the Repository sees plaintext only.
+- **Config encryption** — handled by the `encryption` module ([docs/modules/encryption.md](encryption.md)). Sources can decrypt on Load if they want, but the Repository sees plaintext only.

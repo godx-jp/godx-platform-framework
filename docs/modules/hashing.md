@@ -7,7 +7,7 @@
 
 ## Concepts
 
-A `Hasher` produces self-describing encoded hashes (`$2y$…`, `$argon2id$…`, `$scrypt$…`) so verification doesn't need separate parameters. A `Manager` holds one or more named hashers, so a service can run bcrypt for legacy users and argon2id for new signups side by side — and `Manager.CheckAny` will route an inbound encoded hash to whichever Hasher understands it.
+A `Hasher` produces self-describing encoded hashes (`$2y$…`, `$argon2id$…`, `$scrypt$…`) so verification doesn't need separate parameters. A `Manager` holds one or more named hashers, so a service can run bcrypt for legacy users and argon2id for new signups side by side — and `Manager.CheckAny` will route an inbound encoded hash to whichever hasher understands it.
 
 ```
 Manager ── named Hashers
@@ -18,69 +18,149 @@ Manager ── named Hashers
 ## Quick start
 
 ```go
+package main
+
 import (
+    "context"
+
     "github.com/godx-jp/godx-platform-framework/framework"
     "github.com/godx-jp/godx-platform-framework/hashing"
 )
 
-app := framework.New("svc", "1.0.0").Use(hashing.Module)
-_ = app.Init(ctx)
+func main() {
+    ctx := context.Background()
+    app := framework.New("svc", "1.0.0").Use(hashing.Module)
+    if err := app.Init(ctx); err != nil { panic(err) }
+    defer app.Shutdown(ctx)
 
-mgr, _ := hashing.FromApp(app)
-h := mgr.Default()
+    mgr, _ := hashing.FromApp(app)
+    h := mgr.Default()
 
-enc, _ := h.Make(ctx, "hunter2")
-ok,  _ := h.Check(ctx, "hunter2", enc)
-if h.NeedsRehash(enc) {
-    enc, _ = h.Make(ctx, "hunter2")
+    enc, _ := h.Make(ctx, "hunter2")
+    ok,  _ := h.Check(ctx, "hunter2", enc)
+    if h.NeedsRehash(enc) {
+        enc, _ = h.Make(ctx, "hunter2")
+    }
+    _ = ok
 }
 ```
 
 With no env vars set you get a single `bcrypt` hasher at cost 12 — Laravel's default.
 
-## Drivers
-
-| Driver | Status | Encoded prefix | Notes |
-|---|---|---|---|
-| `bcrypt`   | stable | `$2[ay]$…`     | Laravel default. 72-byte hard limit on plaintext. Cost 4..31 (default 12). |
-| `argon2id` | stable | `$argon2id$v=…` | OWASP 2024 default. Memory + time + threads cost. PHC string format. |
-| `scrypt`   | stable | `$scrypt$ln=…` | RFC 7914. CPU/memory cost via `N` (power of 2), `r`, `p`. |
-
-All three are light drivers (no network deps) and auto-register when the `hashing` package is imported.
-
-## Mixed-driver deployments
+For tests and scripts that don't want a full App, `hashing.MustDefault()` returns a ready bcrypt hasher (cost 12) and panics on construction failure:
 
 ```go
+h := hashing.MustDefault()
+enc, _ := h.Make(ctx, "hunter2")
+```
+
+## Env-var config
+
+| Var | Purpose | Default |
+|---|---|---|
+| `HASHING_DEFAULT` | Default hasher name | `bcrypt` |
+| `HASHING_HASHERS` | Comma-separated list of hashers to register | _default hasher only_ |
+| `HASHING_BCRYPT_COST` | bcrypt cost factor (4..31) | `12` |
+| `HASHING_ARGON2ID_TIME` | argon2id iterations | `3` |
+| `HASHING_ARGON2ID_MEMORY` | argon2id memory in KiB | `65536` (64 MiB) |
+| `HASHING_ARGON2ID_THREADS` | argon2id parallelism | `2` |
+| `HASHING_SCRYPT_N` | scrypt CPU/memory cost (power of 2) | `32768` |
+| `HASHING_SCRYPT_R` | scrypt block size | `8` |
+| `HASHING_SCRYPT_P` | scrypt parallelism | `1` |
+
+Each name in `HASHING_HASHERS` becomes a registered hasher; the driver is inferred from the name (`bcrypt`/`argon2id`/`scrypt`, falling back to `bcrypt` for unknown names). Cost env vars apply to every hasher of the matching driver.
+
+## Programmatic config
+
+```go
+import (
+    "github.com/godx-jp/godx-platform-framework/framework"
+    "github.com/godx-jp/godx-platform-framework/hashing"
+    hdriver "github.com/godx-jp/godx-platform-framework/hashing/driver"
+)
+
 cfg := hashing.Config{
     Default: "primary",
     Hashers: map[string]hashing.HasherConfig{
         "primary": {Driver: "argon2id"},
-        "legacy":  {Driver: "bcrypt", Spec: hashing.driver.Spec{
-            Name: "bcrypt", BcryptCost: 12,
-        }},
+        "legacy":  {Driver: "bcrypt", Spec: hdriver.Spec{Name: "bcrypt", BcryptCost: 12}},
     },
 }
-app := framework.New(...).Use(hashing.ModuleWithConfig(cfg))
-
-mgr, _ := hashing.FromApp(app)
-ok, name, _ := mgr.CheckAny(ctx, plain, storedHash)   // resolves driver from prefix
+app := framework.New("svc", "1.0.0").Use(hashing.ModuleWithConfig(cfg))
 ```
 
-`CheckAny` lets you accept either bcrypt or argon2id during a migration without changing the user's stored hash until the next successful login (at which point `NeedsRehash` will be true and the application can re-Make with the new default).
+`Config.Validate` requires `Default` to be non-empty, at least one hasher, the default name to be present in `Hashers`, and every hasher to name a driver. A `HasherConfig` with an empty `Spec.Name` inherits its `Driver` as the spec name at build time.
 
-## Env var reference
+## Mixed-driver deployments
 
-| Var | Purpose | Default |
-|---|---|---|
-| `HASHING_DEFAULT` | Default driver name | `bcrypt` |
-| `HASHING_HASHERS` | Comma-separated list of hashers to register | _default driver only_ |
-| `HASHING_BCRYPT_COST` | Cost factor (4..31) | `12` |
-| `HASHING_ARGON2ID_TIME` | Iterations | `3` |
-| `HASHING_ARGON2ID_MEMORY` | Memory in KiB | `65536` (64 MiB) |
-| `HASHING_ARGON2ID_THREADS` | Parallelism | `2` |
-| `HASHING_SCRYPT_N` | CPU/memory cost (power of 2) | `32768` |
-| `HASHING_SCRYPT_R` | Block size | `8` |
-| `HASHING_SCRYPT_P` | Parallelism | `1` |
+```go
+mgr, _ := hashing.FromApp(app)
+ok, name, _ := mgr.CheckAny(ctx, plain, storedHash)   // resolves driver from the encoded hash
+```
+
+`CheckAny` tries each registered hasher whose `Info` recognises the encoded hash, returning the matching hasher's name. It lets you accept either bcrypt or argon2id during a migration without changing the user's stored hash until the next successful login (at which point `NeedsRehash` will be true and the application can re-`Make` with the new default). When no registered hasher recognises the encoding, it returns an error.
+
+## Hasher API
+
+`driver.Hasher` is the per-algorithm contract; every method takes `context.Context` first (except `NeedsRehash`/`Info`, which are pure).
+
+| Method | Laravel parallel |
+|---|---|
+| `Make(ctx, plain) (string, error)` | `Hash::make($plain)` — returns the self-describing encoded hash |
+| `Check(ctx, plain, hash) (bool, error)` | `Hash::check($plain, $hash)` |
+| `NeedsRehash(hash) bool` | `Hash::needsRehash($hash)` — true when the stored hash is weaker than current config |
+| `Info(hash) (driver.Info, error)` | `Hash::info($hash)` — `{Algorithm, Params}`; `ErrUnknownFormat` if unrecognised |
+| `Name() string` | the canonical driver name |
+
+## Manager API
+
+| Method | Notes |
+|---|---|
+| `mgr.Default() driver.Hasher` | the hasher flagged as default |
+| `mgr.Hasher(name) (driver.Hasher, error)` | a specific named hasher; error when unregistered |
+| `mgr.Hashers() []string` | sorted names of registered hashers |
+| `mgr.AddHasher(name, h) error` | register a hasher; first registration becomes default; duplicate name errors |
+| `mgr.SetDefault(name) error` | flag an already-registered hasher as default |
+| `mgr.CheckAny(ctx, plain, hash) (bool, string, error)` | try every hasher; returns the matching hasher's name |
+| `mgr.Shutdown(ctx) error` | no-op today (hashers hold no resources) |
+
+## Driver matrix
+
+| Driver | Status | Encoded prefix | Notes |
+|---|---|---|---|
+| `bcrypt`   | stable | `$2[ay]$…`      | Laravel default. 72-byte hard limit on plaintext. Cost 4..31 (default 12). |
+| `argon2id` | stable | `$argon2id$v=…` | OWASP-recommended. Memory + time + threads cost, PHC string format. |
+| `scrypt`   | stable | `$scrypt$…`     | RFC 7914. CPU/memory cost via `N` (power of 2), `r`, `p`. |
+
+All three are **light** drivers — pure CPU (stdlib + `golang.org/x/crypto`), no network dependency — and auto-register via blank imports in the `hashing` package's `register.go`, so importing `hashing` makes all three available.
+
+## Error model
+
+The driver package exports typed sentinels (`github.com/godx-jp/godx-platform-framework/hashing/driver`):
+
+```go
+enc, err := h.Make(ctx, plain)
+switch {
+case errors.Is(err, driver.ErrPasswordTooLong):    // plaintext over the driver limit (bcrypt: 72 bytes)
+case errors.Is(err, driver.ErrIncompatibleParams): // a Spec value out of range (e.g. bcrypt cost > 31)
+}
+
+ok, err := h.Check(ctx, plain, hash)
+// ok == false with err == nil is a clean mismatch.
+if errors.Is(err, driver.ErrInvalidHash) {          // the encoded hash is malformed
+}
+
+info, err := h.Info(hash)
+if errors.Is(err, driver.ErrUnknownFormat) {         // this driver doesn't recognise the encoding — try CheckAny
+}
+```
+
+| Sentinel | Meaning |
+|---|---|
+| `driver.ErrInvalidHash` | encoded hash is malformed (bad segment count / base64) |
+| `driver.ErrUnknownFormat` | the hasher does not recognise this encoding |
+| `driver.ErrPasswordTooLong` | plaintext exceeds the driver's hard limit |
+| `driver.ErrIncompatibleParams` | a `Spec` parameter is outside the accepted range |
 
 ## Laravel API mapping
 
@@ -93,21 +173,16 @@ ok, name, _ := mgr.CheckAny(ctx, plain, storedHash)   // resolves driver from pr
 | `Hash::driver('argon2id')` | `mgr.Hasher("argon2id")` |
 | `config/hashing.php → driver` | `HASHING_DEFAULT` env var |
 
-## Migrating from go-common
+## Context propagation
 
-`umbrella/packages/go-common` has per-service `golang.org/x/crypto/bcrypt` direct calls scattered through identity and platform handlers. Replace them:
+`hashing.ContextWithManager(ctx, mgr)` attaches a `*Manager` to a context; `hashing.FromContext(ctx)` retrieves it (`ok == false` when absent). `hashing.FromApp(app)` is the canonical way to retrieve the manager built by `hashing.Module`.
 
-| Before | After |
-|---|---|
-| `bcrypt.GenerateFromPassword([]byte(p), 12)` | `h.Make(ctx, p)` |
-| `bcrypt.CompareHashAndPassword(stored, []byte(p))` | `h.Check(ctx, p, string(stored))` |
-| Ad-hoc cost constant | `HASHING_BCRYPT_COST` env var, one place |
-| Hand-coded rehash check | `h.NeedsRehash(stored)` |
+## Lifecycle
 
-Migration is incremental — pull `hashing.FromApp(app)` into the request scope; nothing else has to change at the call site.
+`hashing.Module` registers `Manager.Shutdown` as an `OnShutdown` callback. `Shutdown` is a no-op today — hashers hold no resources — but is present so the module fits framework lifecycle conventions. Only one `hashing.Module` may be initialised per App.
 
 ## Out of scope
 
-- **Password policy** — strength checks (length, dictionary, breached) belong in the upcoming `validation` module (v0.9.0).
-- **Symmetric encryption** — `encryption` module (v0.8.3). Don't reach for hashing for "store and later read"; use encryption.
+- **Password policy** — strength checks (length, dictionary, breached) belong in the `validation` module.
+- **Symmetric encryption** — the `encryption` module. Don't reach for hashing for "store and later read"; use encryption.
 - **Token signing / JWT** — separate concern; integrate via your auth layer.

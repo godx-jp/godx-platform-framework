@@ -16,7 +16,7 @@ func TestLoadYAML(t *testing.T) {
 	path := filepath.Join(dir, "cfg.yaml")
 	must(t, os.WriteFile(path, []byte(`
 app:
-  name: tiximax
+  name: acme
   port: 8080
   features:
     - alpha
@@ -33,7 +33,7 @@ app:
 	if !ok {
 		t.Fatalf("app should be map, got %#v", data["app"])
 	}
-	if app["name"] != "tiximax" {
+	if app["name"] != "acme" {
 		t.Fatalf("name unexpected: %v", app["name"])
 	}
 	flags, ok := app["features"].([]any)

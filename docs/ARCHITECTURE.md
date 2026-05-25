@@ -8,7 +8,7 @@ godx-platform-framework is intentionally small — a backbone for modules, not a
 
 1. **Composition over configuration.** No DI graph reflection, no magic. `app.Use(module)` and `module.Init(ctx, app)` are the only contracts.
 2. **Modules are pluggable, the backbone is not.** Adding a feature means adding a module; you never patch the core.
-3. **One module per concern at the repository root.** Mirrors `go-kit`, `kratos`, `go-common`. No god-package, no top-level `pkg/` indirection.
+3. **One module per concern at the repository root.** Mirrors `go-kit`, `kratos`, and similar multi-module Go frameworks. No god-package, no top-level `pkg/` indirection.
 4. **Driver pattern for destinations.** Every module that talks to a backend exposes a swappable driver — see [DRIVER_PATTERN](./DRIVER_PATTERN.md).
 5. **Pay-for-what-you-use dependencies.** Light drivers are auto-registered; heavy drivers require a blank import. A service that only uses stdout never pulls AWS or OTLP into the binary.
 6. **Stdlib-first.** Where the stdlib is sufficient (`log/slog`, `net/http`), we wrap it; we do not replace it.
@@ -217,7 +217,7 @@ The same pattern repeats for every future module — see [DRIVER_PATTERN](./DRIV
 
 ## Why a separate "framework" repo
 
-- **Reusability across teams.** Consumed by multiple products (tiximax is the first); each pulls a pinned SemVer tag.
+- **Reusability across teams.** Consumed by multiple products; each pulls a pinned SemVer tag.
 - **Independent release cadence.** The framework can iterate (e.g. ship 0.5 with storage) without touching consumer repos.
 - **Pluggable testing.** Drivers and modules are interchangeable, which keeps unit tests fast and hermetic (use `stdout` everywhere).
 

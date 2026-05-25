@@ -8,7 +8,13 @@
 
 The secrets module is a thin facade over five drivers. Applications fetch credentials by **logical key** (`db/password`, `auth/token`) and the active driver translates that key into a backend lookup. Switching backends — from local env-vars to cloud KMS — is a configuration change, no code change.
 
-A `*secrets.Manager` owns one or more named stores. `Default()` returns the manager's default; `Store(name)` returns a specific one. The four-method `driver.Store` interface (`Get` / `Put` / `Forget` / `List`) is uniform; backends that cannot enumerate return `driver.ErrListNotSupported`, and read-only backends (env) return `driver.ErrReadOnly` for writes.
+A `*secrets.Manager` owns one or more named stores; each store is backed by a driver chosen at deploy time. `Default()` returns the manager's default; `Store(name)` returns a specific one. The five-method `driver.Store` interface (`Name` / `Get` / `Put` / `Forget` / `List` plus `Shutdown`) is uniform; backends that cannot enumerate return `driver.ErrListNotSupported`, and read-only backends (env) return `driver.ErrReadOnly` for writes.
+
+```
+Manager ── named Stores
+   └─ Store(name) ── Get / Put / Forget (Laravel-style facade)
+         └─ driver.Store (env · file · vault · gcpsm · awssm)
+```
 
 ## Quick start
 
@@ -32,17 +38,36 @@ dbPass, err := mgr.GetString(ctx, "db/password")
 
 `secrets.Module` reads its config from the environment by default; pass `secrets.ModuleWithConfig(cfg)` to wire it programmatically.
 
+## Manager API
+
+Every method takes `context.Context` first and operates on the **default** store. Use `Store(name)` to obtain a specific `driver.Store` and call its methods directly.
+
+| Method | Notes |
+|---|---|
+| `Get(ctx, key) ([]byte, error)` | Reads from the default store; `driver.ErrNotFound` when absent |
+| `GetString(ctx, key) (string, error)` | String wrapper around `Get` |
+| `Put(ctx, key, value) error` | Writes to the default store; `driver.ErrReadOnly` on read-only backends |
+| `PutString(ctx, key, value) error` | String wrapper around `Put` |
+| `Forget(ctx, key) error` | Removes a key; a missing key is not an error |
+| `Default() driver.Store` | The default store (nil when none registered) |
+| `Store(name) (driver.Store, error)` | A named store |
+| `Stores() []string` | Sorted list of registered store names |
+| `AddStore(name, driver.Store) error` / `SetDefault(name) error` | Register a store / switch the default |
+| `Shutdown(ctx) error` | Shuts every store down; joins per-store errors |
+
+The `driver.Store` interface itself is `Name()`, `Get`, `Put`, `Forget`, `List(ctx) ([]string, error)`, and `Shutdown`. `List` returns `driver.ErrListNotSupported` on backends that cannot enumerate (env).
+
 ## Drivers
 
-| Name      | Visibility    | Writable     | Listable | Notes |
-|-----------|---------------|--------------|----------|-------|
-| `env`     | auto          | no           | no       | reads `SECRETS_<KEY>` (upper-cased, dashes/dots/slashes → underscore) |
-| `file`    | auto          | yes (atomic) | yes      | K8s-style; each key is one file under spec.Path |
-| `vault`   | blank-import  | yes          | yes      | HashiCorp KV-v2 |
-| `gcpsm`   | blank-import  | yes          | yes      | Google Cloud Secret Manager (ADC) |
-| `awssm`   | blank-import  | yes          | yes      | AWS Secrets Manager (`SecretBinary` per key) |
+| Driver | Status | Registration | Writable | Listable | Notes |
+|--------|--------|--------------|----------|----------|-------|
+| `env`   | stable | auto | no           | no  | reads `<prefix><KEY>` (default prefix `SECRETS_`); key upper-cased, dashes/dots/slashes/spaces → underscore |
+| `file`  | stable | auto | yes (atomic) | yes | K8s/Docker-style; each key is one file under `spec.Path` (sub-keys become directories), 0600 mode, trailing newline trimmed on read |
+| `vault` | stable | opt-in (`_ "...drivers/vault"`) | yes | yes | HashiCorp Vault KV-v2 |
+| `gcpsm` | stable | opt-in (`_ "...drivers/gcpsm"`) | yes | yes | Google Cloud Secret Manager (Application Default Credentials) |
+| `awssm` | stable | opt-in (`_ "...drivers/awssm"`) | yes | yes | AWS Secrets Manager (`SecretBinary` per key) |
 
-Auto-registered drivers register themselves on package import (already wired by `import "…/secrets"`). Heavy drivers must be blank-imported so their cloud SDKs stay out of binaries that don't use them:
+**Light** drivers (`env`, `file`) auto-register on `import "…/secrets"`. **Heavy** drivers must be blank-imported so their cloud SDKs stay out of binaries that don't use them:
 
 ```go
 import (
@@ -111,28 +136,38 @@ There is no canonical Laravel `Secrets` facade, but the API mirrors Laravel's `C
 | `config(['db.password' => $v])` (runtime)  | `mgr.Put(ctx, "db/password", v)`   |
 | Spatie's `laravel-secrets` `Secret::get()` | `mgr.GetString(ctx, key)`          |
 
+## Error model
+
+All drivers return stable sentinels from `secrets/driver` — branch with `errors.Is`:
+
+```go
+v, err := mgr.Get(ctx, "db/password")
+switch {
+case errors.Is(err, driver.ErrNotFound):         // key absent
+case errors.Is(err, driver.ErrReadOnly):          // backend refuses writes (env)
+case errors.Is(err, driver.ErrListNotSupported):  // backend cannot enumerate (env)
+case errors.Is(err, driver.ErrClosed):            // store used after Shutdown
+case err != nil:                                  // backend failure
+default:                                           // success
+}
+```
+
+## Context propagation
+
+`secrets.ContextWithManager(ctx, mgr)` attaches a manager to a context for handlers that prefer pulling from `context.Context` over a closure. `secrets.FromContext(ctx)` retrieves it (`ok == false` when none is present).
+
+`secrets.FromApp(app)` is the canonical way to retrieve the manager built by `secrets.Module`; it returns an error when the module has not been initialised.
+
+## Lifecycle
+
+`secrets.Module` registers `Manager.Shutdown` via `app.OnShutdown`. On shutdown the manager walks every registered store and calls `Shutdown`, joining any per-store errors so a misbehaving backend does not block the rest. Only one `secrets.Module` may be wired per `App` — a second init returns an error.
+
 ## Security notes
 
 - Stores are not designed to *transform* secrets — they store and retrieve raw bytes. Pair with the [`encryption`](encryption.md) module if you need ciphertext-at-rest semantics on top of a backend that already encrypts at rest (e.g. KMS-backed values stored in a relational DB).
 - The `file` driver writes 0600-mode files via atomic temp+rename to avoid partial reads.
 - The `env` driver is intentionally read-only; production env vars are immutable from the process's perspective.
 - The `vault` driver stores values base64-encoded under a `value` field of a KV-v2 secret, allowing binary payloads. Plain-string secrets written manually outside the driver remain readable verbatim.
-
-## Migrating from go-common
-
-`umbrella/packages/go-common` does not currently expose a secrets abstraction — services either read env vars directly or pull from AWS Secrets Manager through bespoke wrappers. Migration paths:
-
-| go-common pattern                                 | Replacement                                     |
-|---------------------------------------------------|--------------------------------------------------|
-| `os.Getenv("DB_PASSWORD")` scattered through code | `mgr.GetString(ctx, "db/password")` once at startup |
-| ad-hoc `secretsmanager.NewFromConfig(...)` clients| Module + `_ "…/secrets/drivers/awssm"` blank import |
-| AWS SM look-ups inside hot paths                   | Read once at startup; bind to a typed struct |
-
-The recommended migration:
-
-1. Add `secrets.Module` to the service's framework App.
-2. Replace scattered `os.Getenv` calls with `mgr.GetString` (the env driver is the default; behaviour is unchanged in dev).
-3. In production, set `SECRETS_DEFAULT=awssm` + `SECRETS_AWSSM_REGION` and blank-import `…/drivers/awssm`; no code change.
 
 ## Integration tests
 

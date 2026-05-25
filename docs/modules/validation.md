@@ -6,6 +6,26 @@
 
 A `*validation.Validator` owns a registry of named rules and a `Translator` that turns each rule violation into a human message. `ValidateStruct(ctx, v)` walks the struct's exported fields, runs every tagged rule, and returns `nil` or an `Errors` slice. `ValidateField(ctx, value, tag)` checks a single value against an inline rule expression — useful for ad-hoc / dynamic checks outside structs.
 
+```
+Validator ── rule registry (31 built-ins + your AddRule)
+   ├─ ValidateStruct(ctx, v) ── walks struct tags, recurses into nested structs
+   ├─ ValidateField(ctx, value, tag) ── ad-hoc single-value check
+   └─ Translator ── FieldError → human message ({field}/{tag}/{param}/{value})
+```
+
+## Validator API
+
+| Method | Notes |
+|---|---|
+| `New() *Validator` | Validator pre-populated with built-in rules and the English translator |
+| `ValidateStruct(ctx, value) error` | Validates struct tags; returns `Errors` (or wrapped `ErrNotStruct` / `ErrInvalidTag` / `ErrUnknownRule`) |
+| `ValidateField(ctx, value, tag) error` | Validates one value against an inline tag expression |
+| `AddRule(name, Rule) error` | Registers/overwrites a rule; invalidates the compiled-type cache |
+| `HasRule(name) bool` / `Rules() []string` | Membership test / sorted rule names |
+| `SetTranslator(Translator)` / `Translator() Translator` | Swap / read the active translator |
+
+`Rule` is `func(rc RuleContext) error` — return `nil` to pass, any error to fail (the message is supplied by the `Translator`, not the rule). `RuleContext` carries `Ctx`, `Field`, `Tag`, `Value`, `Kind`, `Param`, and `Parent` (for cross-field rules).
+
 ## Quick start
 
 ```go
@@ -81,7 +101,7 @@ Laravel-style: any field that is the zero value **and** not tagged `required` sk
 ## Custom rules
 
 ```go
-v := validation.FromApp(app) // or validation.New()
+v, _ := validation.FromApp(app) // or v := validation.New()
 _ = v.AddRule("notreserved", func(rc validation.RuleContext) error {
     for _, r := range strings.Split(rc.Param, "|") {
         if fmt.Sprint(rc.Value) == r {
@@ -126,6 +146,33 @@ type Customer struct {
 }
 ```
 
+## Error model
+
+A failed `ValidateStruct` / `ValidateField` returns an `Errors` value (a `[]FieldError` that satisfies `error`). Each `FieldError` carries `Field` (dotted path), `Tag` (display name), `Rule`, `Param`, `Value`, and the translated `Message`.
+
+```go
+if err := v.ValidateStruct(ctx, signup); err != nil {
+    var ve validation.Errors
+    if errors.As(err, &ve) {
+        for _, fe := range ve {
+            fmt.Println(fe.Field, fe.Rule, fe.Message)
+        }
+    }
+}
+```
+
+`Errors` exposes `Has()`, `HasField(field)`, `FieldErrors(field)`, `Add(fe)`, and `AsError()`. Malformed tags or unknown rule names are **programmer errors**, not validation failures, so they surface as the distinct sentinels `ErrInvalidTag`, `ErrUnknownRule`, `ErrNotStruct`, and `ErrInvalidParam` (test with `errors.Is`) rather than as entries in `Errors`.
+
+## Context propagation
+
+`validation.ContextWithValidator(ctx, v)` attaches a validator to a context; `validation.FromContext(ctx)` retrieves it (`ok == false` when none is present).
+
+`validation.FromApp(app)` is the canonical way to retrieve the validator published by `validation.Module`; it returns an error when the module has not been initialised.
+
+## Lifecycle
+
+`validation.Module` publishes a single `*Validator` into the framework Store under `validation.StoreKey`. It registers no shutdown hook (the validator holds no external resources). Only one `validation.Module` may be wired per `App` — a second init returns an error. The validator is safe for concurrent use; share the one published by the module across the whole process.
+
 ## Environment-variable reference
 
 The validation module reads no environment variables today — configuration happens through `Module` / `ModuleWithValidator(v)`.
@@ -139,14 +186,3 @@ The validation module reads no environment variables today — configuration hap
 | `$rules['email'] = 'unique:users'`                        | `v.AddRule("unique", customRuleHittingDB)`     |
 | `Lang::add(['en' => ['required' => '...']])`              | `tr.Add("required", "...")`                    |
 | `Validator::extend('foo', fn …)`                          | `v.AddRule("foo", func)`                       |
-
-## Migrating from go-common
-
-`umbrella/packages/go-common` exposes a few ad-hoc validators (email regex, uuid parser) but no struct-tag framework. Migration path:
-
-1. Add `validation.Module` to the service's framework App.
-2. Add `validate:"…"` tags to request DTOs.
-3. Replace per-field `if request.Email == "" { … }` blocks with one `v.ValidateStruct(ctx, request)`.
-4. For ad-hoc checks (e.g. validating a string from a URL query parameter), use `v.ValidateField(ctx, value, "required,uuid")`.
-
-The validator is safe for concurrent use; share one `*Validator` (typically the one published by `validation.Module`) across the whole process.

@@ -36,6 +36,24 @@ o, err := pipeline.New[*Order]().
 )
 ```
 
+## API
+
+`Pipeline[T]` is generic over the value type `T` that flows through the chain. Every stage and the final closure are `context.Context`-first.
+
+| Symbol | Signature | Notes |
+|---|---|---|
+| `New[T]()` | `*Pipeline[T]` | Empty builder. The zero `Pipeline[T]` is also usable |
+| `(*Pipeline[T]).Through(stages ...Stage[T])` | `*Pipeline[T]` | Appends stages in order; nil stages are skipped; chainable |
+| `(*Pipeline[T]).Then(final func(ctx, T) (T, error))` | `Pipe[T]` | Compiles the chain with a terminal closure; nil `final` becomes passthrough |
+| `(*Pipeline[T]).ThenReturn()` | `Pipe[T]` | Compiles with an identity terminal — value returned unchanged |
+| `(*Pipeline[T]).Stages()` | `int` | Number of registered stages — for diagnostics |
+| `Stage[T]` | `func(ctx, value T, next Next[T]) (T, error)` | One transformer; call `next` to continue or return early to short-circuit |
+| `Next[T]` | `func(ctx, value T) (T, error)` | Continuation invoking the rest of the chain |
+| `Pipe[T]` | `func(ctx, value T) (T, error)` | Compiled executor returned by `Then` / `ThenReturn` |
+| `FuncStage[T](fn func(ctx, T))` | `Stage[T]` | Side-effect-only stage that always delegates |
+| `Chain(final http.Handler, stages ...HTTPStage)` | `http.Handler` | Composes net/http middlewares right-to-left |
+| `HTTPStage` | `func(next http.Handler) http.Handler` | Standard net/http middleware shape |
+
 ## Short-circuiting
 
 ```go
@@ -89,16 +107,6 @@ h := pipeline.Chain(
 | `Pipeline::send($x)->through([m1, m2])->then(fn $y)` | `pipeline.New[T]().Through(s1, s2).Then(fn)(ctx, x)` |
 | Closure `fn($x, $next) { return $next($x); }` | `pipeline.Stage[T]` — `func(ctx, T, next) (T, error)` |
 | `App\Http\Kernel` middleware groups | compose multiple slices of `Stage[T]` and `Through(...)` them in order |
-
-## Migrating from go-common
-
-`umbrella/packages/go-common` doesn't ship a pipeline; teams chain calls manually or use chi middleware. Replace ad-hoc chains:
-
-| Before | After |
-|---|---|
-| `result := stepC(stepB(stepA(input)))` | `pipeline.New[T]().Through(stepA, stepB, stepC).ThenReturn()(ctx, input)` |
-| Custom typed `for _, fn := range stages { … }` loop | `pipeline.Pipeline[T]` |
-| Hand-rolled HTTP middleware chain | `pipeline.Chain(handler, m1, m2, m3)` |
 
 ## Out of scope
 

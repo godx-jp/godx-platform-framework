@@ -62,12 +62,25 @@ func main() {
 
 `*` inside a name matches one or more dot-separated segments when it is the trailing or leading wildcard; in the middle it matches exactly one segment.
 
+## The Event
+
+```go
+type Event struct {
+    Name      string            // routing key (required) — matched against listener patterns
+    Payload   any               // opaque to the bus; handed to listeners as-is
+    Metadata  map[string]string // optional out-of-band data
+    CreatedAt time.Time         // stamped at dispatch time when left zero
+}
+```
+
+`Dispatch` returns `events: Event.Name is required` for an empty `Name`, and stamps `CreatedAt` with the current time when the caller leaves it zero.
+
 ## Async dispatch
 
 ```go
 bus := events.NewAsync(events.New(), events.AsyncOptions{
-    Workers:   4,
-    QueueSize: 1024,
+    Workers:   4,    // background workers; <= 0 defaults to 1
+    QueueSize: 1024, // buffered queue depth; <= 0 defaults to 256
     OnError: func(err error) {
         log.Printf("event listener failed: %v", err)
     },
@@ -82,6 +95,8 @@ EVENTS_ASYNC=true
 EVENTS_ASYNC_WORKERS=4
 EVENTS_ASYNC_QUEUE_SIZE=1024
 ```
+
+The module's `ModuleWithConfig(cfg events.Config, onError func(error))` passes `onError` through to the async wrapper. Through the module path `EVENTS_ASYNC_WORKERS` and `EVENTS_ASYNC_QUEUE_SIZE` default to `4` and `256`; constructing `NewAsync` directly defaults `Workers` to `1`.
 
 `Close(ctx)` drains the queue before returning — workers process every job already queued, then exit. If `ctx` expires first, the inner Bus is still closed but pending jobs may be lost.
 
@@ -99,11 +114,23 @@ s := bus.Listen("orders.*", h)
 s.Cancel()
 ```
 
-Subscriptions are also bulk-cancellable by pattern:
+Subscriptions are also bulk-cancellable by pattern (`Forget` removes only subscriptions registered under the exact pattern string, not pattern-matching ones):
 
 ```go
 removed := bus.Forget("orders.*")
 ```
+
+## Bus API
+
+| Method | Notes |
+|---|---|
+| `bus.Listen(pattern, l) Subscription` | Register a listener; panics on empty pattern or nil listener. On a closed bus returns an inert handle |
+| `bus.Forget(pattern) int` | Remove every subscription whose pattern equals `pattern`; returns the count removed |
+| `bus.Dispatch(ctx, e) error` | Fan the event out to matching listeners (sync) or queue it (async). `ErrClosed` after close |
+| `bus.Patterns() []string` | Patterns of all current subscriptions |
+| `bus.Close(ctx) error` | Idempotent; clears subscriptions. The async wrapper drains the queue first |
+
+`Subscription` exposes `Cancel()` (idempotent) and `Pattern() string`.
 
 ## Env var reference
 
@@ -125,16 +152,13 @@ removed := bus.Forget("orders.*")
 | `Subscriber` (class-based) | use a struct with a `Register(bus)` method that registers every pattern |
 | `ShouldQueue` queue listeners | wrap the Bus in `events.NewAsync(...)` |
 
-## Migrating from go-common
+## Context propagation
 
-`umbrella/packages/go-common` does not ship a standalone event bus; teams roll their own callbacks or use the outbox pattern directly. The events module gives those callbacks a single place to register and a uniform context-aware contract.
+`events.ContextWithBus(ctx, bus)` attaches a `Bus` to a context for handlers that prefer pulling it from `context.Context`; `events.FromContext(ctx)` retrieves it (`ok == false` when absent). `events.FromApp(app)` is the canonical way to retrieve the bus published by `events.Module` (under `events.StoreKey`).
 
-| Before | After |
-|---|---|
-| `cb := func(...)` field on a service | `bus.Listen("user.created", cb)` |
-| Per-service notify slices | One Bus on the App, register at Module init |
-| `go func() { ... }()` lifecycle hooks | `events.NewAsync(bus, AsyncOptions{...})` plus listener |
-| Outbox publisher | Listen to `*` and forward to the outbox writer |
+## Lifecycle
+
+`events.Module` publishes the bus under `events.StoreKey` and registers `Bus.Close` as an `OnShutdown` callback. For the async bus, `Close` drains in-flight jobs (subject to the shutdown context). Only one `events.Module` may be initialised per App — a second init returns `events: Module already initialised`.
 
 ## Out of scope
 

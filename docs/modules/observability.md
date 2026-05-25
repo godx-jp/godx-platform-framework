@@ -24,7 +24,7 @@ observability/
 │   ├── file/           (light — auto)
 │   ├── stack/          (light — auto)
 │   ├── otlp/           (heavy — opt-in blank import)
-│   └── cloudwatch/     (heavy — opt-in; CloudWatch Logs v0.13.0)
+│   └── cloudwatch/     (heavy — opt-in; CloudWatch Logs)
 └── middleware/         Optional HTTP middleware sub-package
 ```
 
@@ -78,7 +78,7 @@ If you call `Info` (no `Context` suffix), trace and correlation IDs are skipped 
 | `file` | stable | auto | slog JSON to a local file with Laravel-style rotation (`none` / `daily` / `size`), gzip, retention |
 | `stack` | stable | auto | fan-out: every log record goes to N sub-drivers — Laravel `stack` channel |
 | `otlp` | stable | **opt-in** (`_ "...drivers/otlp"`) | slog JSON to stdout + OTLP gRPC/HTTP for traces + metrics |
-| `cloudwatch` | stub (0.4.x–0.5.x), full (0.6.0) | **opt-in** (`_ "...drivers/cloudwatch"`) | AWS CloudWatch Logs/Metrics + X-Ray |
+| `cloudwatch` | stable | **opt-in** (`_ "...drivers/cloudwatch"`) | slog JSON batched to AWS CloudWatch Logs (`aws-sdk-go-v2`); in-process traces, no-op meter |
 
 For why some drivers are auto-registered and others opt-in, see [DRIVER_PATTERN — Light vs heavy drivers](../DRIVER_PATTERN.md#light-vs-heavy-drivers).
 
@@ -162,13 +162,22 @@ OBSERVABILITY_LOG_FILE_PATH=/var/log/app/app.log
 
 If `OBSERVABILITY_STACK_DRIVERS` includes a heavy driver (e.g. `otlp`), the consumer must still blank-import that driver package.
 
-### cloudwatch (stub in 0.4.x–0.5.x — opt-in)
+### cloudwatch (opt-in)
 
 ```go
 import _ "github.com/godx-jp/godx-platform-framework/observability/drivers/cloudwatch"
 ```
 
-Returns `cloudwatch.ErrNotImplemented` until 0.6.0. Designed as opt-in from day one so the future AWS-SDK-backed implementation is a drop-in upgrade. Tracked env vars: `AWS_REGION`, `OBSERVABILITY_CLOUDWATCH_LOG_GROUP`.
+Ships structured JSON logs to AWS CloudWatch Logs via `aws-sdk-go-v2`. On construction the driver loads the default AWS config (region from `AWS_REGION`, credentials from the standard chain), then creates the log group and a per-host log stream (`<service>/<hostname>`) if they do not already exist. Records are batched in-process (flush every 2 s or every 100 events, and on `Shutdown`) and written with `PutLogEvents`.
+
+Traces run in-process like the `file` driver (you still see `trace_id` in logs); metrics are a no-op until ADOT export lands.
+
+| Env var | Required | Purpose |
+|---------|----------|---------|
+| `OBSERVABILITY_CLOUDWATCH_LOG_GROUP` | yes | CloudWatch Logs log-group name; the driver errors at startup when empty |
+| `AWS_REGION` | no | AWS region; falls back to the default AWS config chain when unset |
+
+Credentials resolve through the standard AWS chain (env → shared config → IRSA → EC2 IMDS).
 
 ## HTTP middleware
 

@@ -232,7 +232,7 @@ Ships the `validation/` module — Laravel-style struct validation with a struct
 - **Nested structs** — recursive validation with dotted field paths (`Address.ZIP`); nil pointer-to-struct skipped.
 - **`validation.Module`** — wires default `Validator` into `framework.App`. `ModuleWithValidator(v)` for custom setup. `FromApp` / context helpers.
 - **`examples/validation/main.go`** — happy path, multi-field failures, custom rule + Vietnamese translator demo.
-- **`docs/modules/validation.md`** — full reference, rule table, Laravel mapping, Migrating from go-common.
+- **`docs/modules/validation.md`** — full reference, rule table, Laravel mapping
 
 ### Tests
 
@@ -267,7 +267,7 @@ Ships the `secrets/` module — uniform `Get`/`Put`/`Forget` over environment va
 - **`drivers/awssm`** — heavy, opt-in. AWS Secrets Manager via `aws-sdk-go-v2/service/secretsmanager`. Values stored as `SecretBinary`; falls back to `SecretString` on read. `Put` tries `PutSecretValue` first and falls back to `CreateSecret` on `ResourceNotFoundException`. `Forget` uses force-delete (no recovery window). `List` paginates `ListSecrets` and trims the configured prefix.
 - **`secrets.Module`** — env-driven (`SECRETS_DEFAULT`, `SECRETS_STORES`, `SECRETS_PREFIX`, plus per-driver `SECRETS_ENV_PREFIX`, `SECRETS_FILE_PATH`, `SECRETS_VAULT_*`, `SECRETS_GCPSM_PROJECT`, `SECRETS_AWSSM_REGION`). `ModuleWithConfig` for code-driven setup. `FromApp(app)` returns the published Manager.
 - **`examples/secrets/main.go`** — runnable demo with redaction. Shows default env-driver lookup plus instructions to switch to the file driver via env-only changes.
-- **`docs/modules/secrets.md`** — full reference: concepts, driver matrix, key normalisation, mixed-driver deployments, env var reference, Laravel parity notes, security notes, Migrating from go-common section.
+- **`docs/modules/secrets.md`** — full reference: concepts, driver matrix, key normalisation, mixed-driver deployments, env var reference, Laravel parity notes, security notes
 
 ### Tests
 
@@ -310,7 +310,7 @@ Ships the `pipeline/` module — Laravel's `Pipeline` facade reimagined for Go w
 - **`Stage[T] = func(ctx, T, next) (T, error)`** — closure shape matching Laravel's `fn ($x, $next) { … }`. `FuncStage(fn)` helper wraps side-effect-only closures that always delegate.
 - **`pipeline.Chain(final, stages...)`** — net/http compatibility helper. Composes `HTTPStage = func(next http.Handler) http.Handler` right-to-left so the first argument runs outermost (matches chi/echo/gin `Use(...)` conventions).
 - **`examples/pipeline/main.go`** — demonstrates typed Order pipeline with coupon + VAT stages and an interleaved trace stage.
-- **`docs/modules/pipeline.md`** — full reference + Laravel mapping + Migrating from go-common.
+- **`docs/modules/pipeline.md`** — full reference + Laravel mapping.
 
 ### Tests
 
@@ -330,7 +330,7 @@ Ships the `encryption/` module — authenticated symmetric encryption with versi
 - **`encryption.Module`** — env-driven (`ENCRYPTION_DRIVER`, `ENCRYPTION_KEY`, `ENCRYPTION_PRIMARY_KEY_ID`, `ENCRYPTION_PREVIOUS_KEYS`). `ModuleWithConfig` for code-driven wiring. `MustNew(keyEncoded)` for tests/scripts.
 - **`ParseKey`** — accepts `base64:<…>` (Laravel APP_KEY style), `hex:<…>`, or raw bytes.
 - **`examples/encryption/main.go`** — generates a demo key if none supplied; shows token + KeyIDOf round trip.
-- **`docs/modules/encryption.md`** — full reference: token format, rotation strategy (deploy-time and runtime), drivers, env vars, security notes, Laravel API mapping, Migrating from go-common.
+- **`docs/modules/encryption.md`** — full reference: token format, rotation strategy (deploy-time and runtime), drivers, env vars, security notes, Laravel API mapping
 
 ### Tests
 
@@ -352,7 +352,7 @@ Ships the `hashing/` module — Laravel's `Hash` facade with three modern driver
 - **`drivers/scrypt`** — RFC 7914 with a `$scrypt$ln=…,r=…,p=…$salt$digest` custom encoding (stores log2(N) so rehash math stays exact). Defaults match RFC 7914 interactive-login guidance.
 - **`hashing.Module`** — env-driven (`HASHING_DEFAULT`, `HASHING_HASHERS`, `HASHING_BCRYPT_COST`, `HASHING_ARGON2ID_*`, `HASHING_SCRYPT_*`). `ModuleWithConfig` for code-driven wiring. `MustDefault()` returns a bcrypt hasher without the App boilerplate for tests and scripts.
 - **`examples/hashing/main.go`** — runnable demo: Make / Check correct + wrong / Info / NeedsRehash across driver choice.
-- **`docs/modules/hashing.md`** — full reference: drivers, mixed-driver deployments, env vars, Laravel mapping, Migrating from go-common section.
+- **`docs/modules/hashing.md`** — full reference: drivers, mixed-driver deployments, env vars, Laravel mapping
 
 ### Tests
 
@@ -379,7 +379,7 @@ Ships the `events/` module — an in-process event bus with wildcard listeners, 
 - **`events.NewAsync(inner, AsyncOptions{...})`** — fire-and-forget wrapper backed by a worker pool. `Dispatch` returns when the queue accepts the job (or the context is canceled, or the bus is closed). `Close(ctx)` drains pending jobs before returning. `Options.OnError` surfaces listener errors.
 - **`events.Module`** — env-driven (`EVENTS_ASYNC`, `EVENTS_ASYNC_WORKERS`, `EVENTS_ASYNC_QUEUE_SIZE`). Publishes the Bus under `events.StoreKey`. `ModuleWithConfig(cfg, onError)` for code-driven wiring.
 - **`examples/events/main.go`** — runnable demo covering exact-match, wildcard fan-out, and the global `*` catch-all.
-- **`docs/modules/events.md`** — full reference + Laravel API mapping + Migrating from go-common.
+- **`docs/modules/events.md`** — full reference + Laravel API mapping.
 
 ### Tests
 
@@ -402,7 +402,7 @@ Foundation release for the Laravel-parity roadmap. Ships the `config/` module �
 - **`config/drivers/static`** — in-process map source for tests and compile-time defaults. Exposes `Update(map[string]any)` for live mutation.
 - **`config/module.go`** — `config.Module` reads `Config` from env (`CONFIG_SOURCES`, `CONFIG_AUTO_ENV`, `CONFIG_ENV_PREFIX`, plus per-source `CONFIG_SOURCE_<NAME>_*`) and publishes `*Manager` under `config.StoreKey`. `ModuleWithConfig(cfg)` for code-driven wiring. Auto-env source appended last so process env always overrides files (matches Laravel `.env` precedence).
 - **`examples/config/main.go`** — runnable demo covering env-only, file-only, and layered file+env-override flows.
-- **`docs/modules/config.md`** — full module reference: env table, driver matrix, typed accessor table, Laravel API mapping, and a "Migrating from go-common" section for Tiximax services.
+- **`docs/modules/config.md`** — full module reference: env table, driver matrix, typed accessor table, Laravel API mapping.
 
 ### Tests
 
@@ -681,7 +681,7 @@ None required. Existing wiring keeps working:
 
 ## [0.4.0] — 2026-05-25
 
-This release is a **structural breaking change** to put the framework on the same layout convention as `go-kit`, `OpenTelemetry Go`, `kratos`, and the team's own `go-common` — one package per concern at the root, public driver contract under `<module>/driver/`, built-in driver implementations split into one package each under `<module>/drivers/<name>/`, optional integration sub-packages (e.g. `<module>/middleware/`). The shape is fixed so that every future module (storage, cache, queue, httpx, ...) slots in identically.
+This release is a **structural breaking change** to put the framework on the same layout convention as `go-kit`, `OpenTelemetry Go`, and `kratos` — one package per concern at the root, public driver contract under `<module>/driver/`, built-in driver implementations split into one package each under `<module>/drivers/<name>/`, optional integration sub-packages (e.g. `<module>/middleware/`). The shape is fixed so that every future module (storage, cache, queue, httpx, ...) slots in identically.
 
 No behaviour changes for the primary user paths (`obs.Logger()`, `obs.Tracer()`, `obs.Meter()`, env-driven driver selection, Laravel-style channels). The breaking changes are import paths and one method rename.
 

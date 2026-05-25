@@ -2,13 +2,13 @@
 //
 // Zero-config (process env only, no prefix):
 //
-//	APP_NAME=tiximax APP_PORT=8080 go run ./examples/config
+//	APP_NAME=acme APP_PORT=8080 go run ./examples/config
 //
 // With a file source:
 //
 //	cat > /tmp/cfg.yaml <<'YAML'
 //	app:
-//	  name: tiximax
+//	  name: acme
 //	  port: 9090
 //	  features:
 //	    - alpha

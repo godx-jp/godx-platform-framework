@@ -24,7 +24,7 @@ A single `Manager` holds one or more named `Disk` handles; each disk is backed b
 
 ## Quick start
 
-Zero env vars set — you get a single `local` disk rooted at `./storage`, private visibility:
+Zero env vars set — you get a single `local` disk rooted at `./storage/app/private` (Laravel-faithful), private visibility:
 
 ```go
 import (

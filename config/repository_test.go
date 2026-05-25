@@ -9,7 +9,7 @@ import (
 func TestRepositoryTypedAccessors(t *testing.T) {
 	r := NewRepository(map[string]any{
 		"app": map[string]any{
-			"name":  "tiximax",
+			"name":  "acme",
 			"port":  8080,
 			"debug": "yes",
 			"rate":  3.14,
@@ -21,8 +21,8 @@ func TestRepositoryTypedAccessors(t *testing.T) {
 		},
 	})
 
-	if r.GetString("app.name", "fallback") != "tiximax" {
-		t.Fatalf("GetString: want tiximax")
+	if r.GetString("app.name", "fallback") != "acme" {
+		t.Fatalf("GetString: want acme")
 	}
 	if r.GetString("missing", "default") != "default" {
 		t.Fatalf("GetString missing: want default")

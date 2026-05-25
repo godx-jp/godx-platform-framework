@@ -12,7 +12,7 @@ import (
 func TestModuleWiresIntoApp(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cfg.yaml")
-	if err := os.WriteFile(path, []byte("app: { name: tiximax, port: 9000 }\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("app: { name: acme, port: 9000 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -33,7 +33,7 @@ func TestModuleWiresIntoApp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FromApp: %v", err)
 	}
-	if repo.GetString("app.name", "") != "tiximax" {
+	if repo.GetString("app.name", "") != "acme" {
 		t.Fatalf("did not load app.name")
 	}
 	if repo.GetInt("app.port", 0) != 9000 {

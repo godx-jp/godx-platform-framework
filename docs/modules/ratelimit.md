@@ -39,13 +39,31 @@ handler := middleware.Limit(lim, middleware.ByIP)(yourHandler)
 handler = middleware.Limit(lim, middleware.ByHeader("X-API-Key"))(handler)
 ```
 
-When the bucket is empty: **429 Too Many Requests** + **Retry-After** (seconds until a token refills).
+When the bucket is empty: **429 Too Many Requests** + **Retry-After**
+(seconds, ceil of the configured `RetryAfter`, default `1s`). A limiter
+**error** maps to **500 Internal Server Error**.
 
 Compose with chi / httpx:
 
 ```go
 r.Use(middleware.Limit(lim, middleware.ByIP))
 ```
+
+### Middleware API
+
+| Symbol | Purpose |
+|---|---|
+| `Handler(Options) func(http.Handler) http.Handler` | Full control via `Options{Limiter, KeyFunc, RetryAfter}` |
+| `Limit(l, keyFunc) func(http.Handler) http.Handler` | Convenience wrapper, default `RetryAfter` |
+| `LimitWithRetryAfter(l, keyFunc, d) func(http.Handler) http.Handler` | `Limit` with an explicit `Retry-After` duration |
+| `ByIP(*http.Request) string` | Key by client IP (honours first `X-Forwarded-For` hop) |
+| `ByHeader(name string) KeyFunc` | Key by a request header value |
+| `UserKey(header string) KeyFunc` | `user:<header>`, falls back to `ByIP` when the header is empty |
+| `StringKey(parts ...string) string` | Join key segments with `:` |
+
+`KeyFunc` is `func(*http.Request) string`. When the resolved key is
+empty the middleware uses the literal `"_"`. `Handler` defaults a nil
+`KeyFunc` to `ByIP` and a non-positive `RetryAfter` to `1s`.
 
 ## Drivers
 
@@ -81,11 +99,23 @@ See [SHARED_INFRA.md](../SHARED_INFRA.md) for the full production sketch.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `RATELIMIT_DEFAULT` | `memory` | Default limiter name |
-| `RATELIMIT_LIMITERS` | default only | CSV of limiter names |
+| `RATELIMIT_LIMITERS` | the default name | CSV of limiter names |
+| `RATELIMIT_RATE` | `10` | Global default refill rate (tokens/sec) |
+| `RATELIMIT_BURST` | `20` | Global default bucket capacity |
 | `RATELIMIT_PREFIX` | _empty_ | Global Redis key prefix |
-| `RATELIMIT_LIMITER_<NAME>_RATE` | `60` | Tokens per window |
-| `RATELIMIT_LIMITER_<NAME>_BURST` | `rate` | Bucket capacity |
-| `RATELIMIT_LIMITER_<NAME>_URL` | | Redis URL (redis driver) |
+| `RATELIMIT_LIMITER_<NAME>_DRIVER` | inferred from name | Backend (`memory` / `redis`) |
+| `RATELIMIT_LIMITER_<NAME>_RATE` | `RATELIMIT_RATE` | Refill rate (tokens/sec) |
+| `RATELIMIT_LIMITER_<NAME>_BURST` | `RATELIMIT_BURST` | Bucket capacity |
+| `RATELIMIT_LIMITER_<NAME>_PREFIX` | `RATELIMIT_PREFIX` | Redis key prefix |
+| `RATELIMIT_LIMITER_<NAME>_URL` | — | Redis URL (`redis://…`) |
+| `RATELIMIT_LIMITER_<NAME>_ADDRESS` | — | Redis host:port when URL unset |
+| `RATELIMIT_LIMITER_<NAME>_USERNAME` | — | Redis username |
+| `RATELIMIT_LIMITER_<NAME>_PASSWORD` | — | Redis password |
+| `RATELIMIT_LIMITER_<NAME>_DB` | `0` | Redis logical DB |
+
+When a limiter is named `memory` or `redis` the driver is inferred from
+the name; otherwise set `_DRIVER` explicitly. `<NAME>` is upper-cased
+with `-` replaced by `_`.
 
 Full list: [CONFIGURATION.md](../CONFIGURATION.md#rate-limit).
 
@@ -138,11 +168,41 @@ RATELIMIT_LIMITERS=memory
 
 | Method | Description |
 |--------|-------------|
-| `mgr.Allow(ctx, key) (bool, error)` | Consume one token |
-| `mgr.Reset(ctx, key) error` | Clear bucket for key |
-| `lim.Allow / Reset` | Same on a named limiter |
-| `mgr.Default()` | Default limiter |
-| `mgr.Limiter(name)` | Named limiter |
+| `mgr.Allow(ctx, key) (bool, error)` | Consume one token from the default limiter |
+| `mgr.Reset(ctx, key)` | Clear the bucket for key on the default limiter (no return value) |
+| `mgr.Default() driver.Limiter` | Default limiter (may be nil if unset) |
+| `mgr.Limiter(name) (driver.Limiter, error)` | Named limiter |
+| `mgr.Names() []string` | Sorted limiter names |
+| `lim.Allow(ctx, key) (bool, error)` | Consume one token on a named limiter |
+| `lim.Reset(ctx, key)` | Clear bucket on a named limiter (no return value) |
+
+The `driver.Limiter` interface is `Name() string`,
+`Allow(ctx, key) (bool, error)`, `Reset(ctx, key)`, and
+`Shutdown(ctx) error`.
+
+## Error model
+
+| Error | When |
+|-------|------|
+| `driver.ErrClosed` | A limiter is used after `Shutdown` |
+
+`mgr.Allow` returns an error (not `false`) when no default limiter is
+configured. `mgr.Limiter(name)` errors on an unknown name. The Redis
+driver surfaces connection/Lua errors through `Allow`; the middleware
+turns those into HTTP 500.
+
+## Context propagation
+
+`ratelimit.ContextWithManager(ctx, mgr)` attaches a manager to a context
+and `ratelimit.FromContext(ctx)` retrieves it. `ratelimit.FromApp(app)`
+is the canonical way to fetch the manager built by `ratelimit.Module`.
+
+## Lifecycle
+
+`ratelimit.Module` stores the `Manager` under `ratelimit.StoreKey` and
+registers an `OnShutdown` callback that calls `Shutdown` on every
+limiter (closing the Redis pool, marking memory limiters closed). Errors
+from individual limiters are joined and returned.
 
 ## Laravel mapping
 
@@ -165,7 +225,3 @@ RATELIMIT_LIMITERS=memory
 ```bash
 go test -race ./ratelimit/...
 ```
-
-## Migrating from go-common
-
-Replace ad-hoc `sync.Map` counters or bespoke Redis Lua with the driver registry. Use **memory** locally; blank-import **redis** when replicas must share one limit. Point at the **same Redis URL** as cache with a **different prefix** — do not run a second Redis server unless ops requires it.
