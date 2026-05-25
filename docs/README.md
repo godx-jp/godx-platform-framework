@@ -27,7 +27,8 @@ Index for the godx-platform-framework documentation.
 | `encryption` | stable (v0.8.3) | [modules/encryption](./modules/encryption.md) |
 | `pipeline` | stable (v0.8.4) | [modules/pipeline](./modules/pipeline.md) |
 | `secrets` | stable (v0.8.5) | [modules/secrets](./modules/secrets.md) |
-| `validation`, `httpclient`, `ratelimit` | roadmap (v0.9.x) | — |
+| `validation` | stable (v0.9.0) | [modules/validation](./modules/validation.md) |
+| `httpclient`, `ratelimit` | roadmap (v0.9.x) | — |
 | `mail`, `notifications`, `scheduler`, `featureflag`, `resilience` | roadmap (v0.10.x) | — |
 | `queue` | roadmap (v0.11) | — |
 | `httpx` | roadmap (v0.12) | — |

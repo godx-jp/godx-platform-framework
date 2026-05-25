@@ -4,6 +4,41 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-05-25
+
+Ships the `validation/` module — Laravel-style struct validation with a struct-tag DSL, pluggable rule registry, and i18n message templates. First release in the v0.9.x validation + HTTP client + rate limit wave.
+
+### Added
+
+- **`validation/` module** — `Validator` with `ValidateStruct(ctx, v)` and `ValidateField(ctx, value, tag)`. Returns `nil` or an `Errors` slice of `FieldError` values with translated messages.
+- **Struct-tag DSL** — `validate:"required,email,max=255"`. Comma-separated rules; parameters after `=`; single-quoted params for values containing commas (`oneof='a,b,c'`).
+- **30+ built-in rules** — `required`, `min`/`max`/`len`/`between`, `eq`/`ne`/`gt`/`gte`/`lt`/`lte`, `in`/`oneof`, `email`, `url`, `uuid`, `regex`, `ip`/`ipv4`/`ipv6`, `alpha`/`numeric`/`alphanum`, `json`, `startswith`/`endswith`/`contains`, cross-field `eqfield`/`nefield`/`gtfield`/`ltfield`.
+- **Pluggable rules** — `AddRule(name, Rule)` overwrites built-ins; unknown rule names in struct tags fail at compile time (first `ValidateStruct` call) with `ErrUnknownRule`.
+- **i18n** — `MapTranslator` with `{field}`, `{tag}`, `{rule}`, `{param}`, `{value}` placeholders. Bundled English templates for every built-in rule; `SetTranslator` for locale swaps.
+- **Nullable semantics** — zero-value fields skip all rules except `required` (Laravel-style).
+- **Nested structs** — recursive validation with dotted field paths (`Address.ZIP`); nil pointer-to-struct skipped.
+- **`validation.Module`** — wires default `Validator` into `framework.App`. `ModuleWithValidator(v)` for custom setup. `FromApp` / context helpers.
+- **`examples/validation/main.go`** — happy path, multi-field failures, custom rule + Vietnamese translator demo.
+- **`docs/modules/validation.md`** — full reference, rule table, Laravel mapping, Migrating from go-common.
+
+### Tests
+
+- **`validation/parser_test.go`** — tag parsing, quoted params, invalid tags, JSON tag name extraction.
+- **`validation/validator_test.go`** — struct validation, nullable skip, nested structs, custom rules, unknown rule compile error, standalone field validation, custom translator.
+- **`validation/rules_test.go`** — per-rule conformance for every built-in rule + cross-field rules.
+- **`validation/module_test.go`** — App wiring, duplicate init rejection, context helpers.
+- **`validation/edges_test.go`** — concurrent access, cache invalidation on AddRule, unexported field skip.
+
+### Changed
+
+- `docs/ARCHITECTURE.md` repository layout lists `validation/` tree.
+- `README.md` Modules table shows validation as stable (v0.9.0).
+
+### Roadmap
+
+- v0.9.1 ships `httpclient/` (stdlib + mock + resilient drivers, OTel transport).
+- HTTP request-body validation middleware lands with `httpx` in v0.12.x.
+
 ## [0.8.5] — 2026-05-25
 
 Ships the `secrets/` module — uniform `Get`/`Put`/`Forget` over environment variables, file mounts, HashiCorp Vault, Google Secret Manager, and AWS Secrets Manager. Sixth release in the Laravel-parity reshuffle and the last of the v0.8.x security & utility primitives wave.
