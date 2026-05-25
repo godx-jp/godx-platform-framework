@@ -22,7 +22,8 @@ Index for the godx-platform-framework documentation.
 | `storage` | stable (v0.6.x) | [modules/storage](./modules/storage.md) |
 | `cache` | stable (v0.7.0) | [modules/cache](./modules/cache.md) |
 | `config` | stable (v0.8.0) | [modules/config](./modules/config.md) |
-| `events`, `hashing`, `encryption`, `pipeline`, `secrets` | roadmap (v0.8.x) | — |
+| `events` | stable (v0.8.1) | [modules/events](./modules/events.md) |
+| `hashing`, `encryption`, `pipeline`, `secrets` | roadmap (v0.8.x) | — |
 | `validation`, `httpclient`, `ratelimit` | roadmap (v0.9.x) | — |
 | `mail`, `notifications`, `scheduler`, `featureflag`, `resilience` | roadmap (v0.10.x) | — |
 | `queue` | roadmap (v0.11) | — |

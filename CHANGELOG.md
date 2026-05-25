@@ -4,6 +4,28 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-05-25
+
+Ships the `events/` module — an in-process event bus with wildcard listeners, optional async worker pool, and `framework.App` wiring. Second release in the Laravel-parity roadmap reshuffle.
+
+### Added
+
+- **`events/` module** — `Bus` interface with `Listen / Forget / Dispatch / Patterns / Close`. `New()` returns the default synchronous in-process bus. Concurrency-safe; idempotent `Close`.
+- **Wildcard patterns** — `*` (all), `user.*` (trailing), `*.deleted` (leading), `user.*.email` (mid-segment). Multi-segment trailing wildcards handle nested namespaces (`user.*` matches `user.profile.updated`).
+- **`Subscription`** — handle returned by `Listen`; `Cancel()` removes that exact listener without affecting siblings. `Forget(pattern)` bulk-removes by exact pattern match.
+- **Error joining + panic safety** — listener errors are joined via `errors.Join`; siblings still run. A panicking listener is converted to an error so other listeners stay protected.
+- **`events.NewAsync(inner, AsyncOptions{...})`** — fire-and-forget wrapper backed by a worker pool. `Dispatch` returns when the queue accepts the job (or the context is canceled, or the bus is closed). `Close(ctx)` drains pending jobs before returning. `Options.OnError` surfaces listener errors.
+- **`events.Module`** — env-driven (`EVENTS_ASYNC`, `EVENTS_ASYNC_WORKERS`, `EVENTS_ASYNC_QUEUE_SIZE`). Publishes the Bus under `events.StoreKey`. `ModuleWithConfig(cfg, onError)` for code-driven wiring.
+- **`examples/events/main.go`** — runnable demo covering exact-match, wildcard fan-out, and the global `*` catch-all.
+- **`docs/modules/events.md`** — full reference + Laravel API mapping + Migrating from go-common.
+
+### Tests
+
+- **`events/bus_test.go`** — exact-match dispatch, fan-out across exact + multiple wildcards, default `CreatedAt` stamping, joined listener errors, panic recovery, `Subscription.Cancel` (idempotent), `Forget` count, empty `Event.Name` rejection, empty-pattern + nil-listener panic, context cancellation surfacing, idempotent `Close` returning `ErrClosed` on subsequent `Dispatch`, concurrent Listen+Dispatch+Cancel sweep.
+- **`events/async_test.go`** — fire-and-forget high-throughput, `OnError` plumbing, `Close` drains pending jobs, post-close `Dispatch` returns `ErrClosed`, context cancellation while queue is full, `Listen / Forget / Patterns` proxied through to the inner Bus.
+- **`events/matcher_test.go`** — pattern-matching table covering every wildcard placement.
+- **`events/module_test.go`** — `Module` wires the Bus into `framework.App`, async config from env, `ContextWithBus / FromContext` round trip, env-loading boundary cases.
+
 ## [0.8.0] — 2026-05-25
 
 Foundation release for the Laravel-parity roadmap. Ships the `config/` module — a layered configuration repository with typed accessors and pluggable sources. Module skeleton is the same shape as `cache/` and `storage/` so adding new sources stays mechanical.
