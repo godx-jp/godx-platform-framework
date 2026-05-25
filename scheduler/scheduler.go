@@ -14,34 +14,50 @@ import (
 // JobFunc is the callback invoked for each scheduled run.
 type JobFunc func(ctx context.Context) error
 
+// QueuePushFunc dispatches a payload to a named queue (RunOnQueue).
+type QueuePushFunc func(ctx context.Context, queue string, payload []byte) error
+
 // Options configures a Scheduler.
 type Options struct {
-	Location *time.Location
+	Location        *time.Location
 	DistributedLock lock.Mutex
 	Bus             events.Bus
 	DefaultTimeout  time.Duration
+	QueuePush       QueuePushFunc
+	OnRun           func(job string, err error)
 }
 
 type Scheduler struct {
-	cron    *cron.Cron
-	parser  cron.Parser
-	mu      sync.Mutex
-	started bool
-	jobs    []jobDef
-	bus     events.Bus
+	cron           *cron.Cron
+	parser         cron.Parser
+	mu             sync.Mutex
+	started        bool
+	jobs           []jobDef
+	bus            events.Bus
 	defaultTimeout time.Duration
+	queuePush      QueuePushFunc
+	onRun          func(job string, err error)
 
 	memLock  lock.Mutex
 	distLock lock.Mutex
 	runWG    sync.WaitGroup
+
+	healthMu sync.RWMutex
+	health   map[string]JobHealth
 }
 
 type jobDef struct {
-	name             string
-	withoutOverlap   bool
-	onOneServer      bool
-	timeout          time.Duration
-	fn               JobFunc
+	name           string
+	withoutOverlap bool
+	onOneServer    bool
+	timeout        time.Duration
+	environments   []string
+	betweenStart   string
+	betweenEnd     string
+	when           func() bool
+	unless         func() bool
+	runOnQueue     string
+	fn             JobFunc
 }
 
 // New returns a Scheduler. DistributedLock may be set via Options or
@@ -59,6 +75,9 @@ func New(opts Options) *Scheduler {
 		distLock:       opts.DistributedLock,
 		bus:            opts.Bus,
 		defaultTimeout: opts.DefaultTimeout,
+		queuePush:      opts.QueuePush,
+		onRun:          opts.OnRun,
+		health:         map[string]JobHealth{},
 	}
 	return s
 }
@@ -67,6 +86,13 @@ func New(opts Options) *Scheduler {
 func (s *Scheduler) WithDistributedLock(m lock.Mutex) {
 	s.mu.Lock()
 	s.distLock = m
+	s.mu.Unlock()
+}
+
+// WithQueuePush sets the callback used by RunOnQueue schedules.
+func (s *Scheduler) WithQueuePush(fn QueuePushFunc) {
+	s.mu.Lock()
+	s.queuePush = fn
 	s.mu.Unlock()
 }
 
@@ -87,6 +113,12 @@ type Schedule struct {
 	withoutOverlap   bool
 	onOneServer      bool
 	timeout          time.Duration
+	environments     []string
+	betweenStart     string
+	betweenEnd       string
+	when             func() bool
+	unless           func() bool
+	runOnQueue       string
 }
 
 // WithoutOverlapping skips a run when the previous invocation is still active.
@@ -107,12 +139,43 @@ func (sc *Schedule) Timeout(d time.Duration) *Schedule {
 	return sc
 }
 
+// Environments limits execution to the given APP_ENV values.
+func (sc *Schedule) Environments(envs ...string) *Schedule {
+	sc.environments = append([]string(nil), envs...)
+	return sc
+}
+
+// Between limits execution to a daily time window (HH:MM, 24h).
+func (sc *Schedule) Between(start, end string) *Schedule {
+	sc.betweenStart = start
+	sc.betweenEnd = end
+	return sc
+}
+
+// When skips the run when fn returns false.
+func (sc *Schedule) When(fn func() bool) *Schedule {
+	sc.when = fn
+	return sc
+}
+
+// Unless skips the run when fn returns true.
+func (sc *Schedule) Unless(fn func() bool) *Schedule {
+	sc.unless = fn
+	return sc
+}
+
+// RunOnQueue dispatches payload to queue instead of running fn inline.
+func (sc *Schedule) RunOnQueue(queue string) *Schedule {
+	sc.runOnQueue = queue
+	return sc
+}
+
 // Do registers name and fn with the parent Scheduler.
 func (sc *Schedule) Do(name string, fn JobFunc) error {
 	if name == "" {
 		return fmt.Errorf("scheduler: job name is required")
 	}
-	if fn == nil {
+	if fn == nil && sc.runOnQueue == "" {
 		return fmt.Errorf("scheduler: job %q: nil callback", name)
 	}
 	def := jobDef{
@@ -120,6 +183,12 @@ func (sc *Schedule) Do(name string, fn JobFunc) error {
 		withoutOverlap: sc.withoutOverlap,
 		onOneServer:    sc.onOneServer,
 		timeout:        sc.timeout,
+		environments:   sc.environments,
+		betweenStart:   sc.betweenStart,
+		betweenEnd:     sc.betweenEnd,
+		when:           sc.when,
+		unless:         sc.unless,
+		runOnQueue:     sc.runOnQueue,
 		fn:             fn,
 	}
 	wrapped := func() {
@@ -143,14 +212,43 @@ func (sc *Schedule) Do(name string, fn JobFunc) error {
 
 func (s *Scheduler) runJob(def jobDef) {
 	ctx := context.Background()
+
+	if MaintenanceMode() {
+		s.emit(ctx, EventSkipped, def.name, "maintenance", nil)
+		s.recordHealth(def.name, EventSkipped, "maintenance")
+		return
+	}
+	if !envAllowed(def.environments) {
+		s.emit(ctx, EventSkipped, def.name, "environment", nil)
+		s.recordHealth(def.name, EventSkipped, "environment")
+		return
+	}
+	if !withinBetween(time.Now(), def.betweenStart, def.betweenEnd) {
+		s.emit(ctx, EventSkipped, def.name, "between", nil)
+		s.recordHealth(def.name, EventSkipped, "between")
+		return
+	}
+	if def.when != nil && !def.when() {
+		s.emit(ctx, EventSkipped, def.name, "when", nil)
+		s.recordHealth(def.name, EventSkipped, "when")
+		return
+	}
+	if def.unless != nil && def.unless() {
+		s.emit(ctx, EventSkipped, def.name, "unless", nil)
+		s.recordHealth(def.name, EventSkipped, "unless")
+		return
+	}
+
 	if def.onOneServer {
 		if s.distLock == nil {
 			s.emit(ctx, EventSkipped, def.name, "lock_misconfigured", nil)
+			s.recordHealth(def.name, EventSkipped, "lock_misconfigured")
 			return
 		}
 		release, ok, err := s.distLock.TryAcquire(ctx, def.name)
 		if err != nil || !ok {
 			s.emit(ctx, EventSkipped, def.name, "lock_busy", err)
+			s.recordHealth(def.name, EventSkipped, "lock_busy")
 			return
 		}
 		defer func() { _ = release() }()
@@ -160,6 +258,7 @@ func (s *Scheduler) runJob(def jobDef) {
 		release, ok, err := s.memLock.TryAcquire(ctx, def.name)
 		if err != nil || !ok {
 			s.emit(ctx, EventSkipped, def.name, "overlap", err)
+			s.recordHealth(def.name, EventSkipped, "overlap")
 			return
 		}
 		defer func() { _ = release() }()
@@ -182,12 +281,28 @@ func (s *Scheduler) runJob(def jobDef) {
 	defer s.runWG.Done()
 	s.emit(runCtx, EventStarted, def.name, "", nil)
 	start := time.Now()
-	err := def.fn(runCtx)
+
+	var err error
+	if def.runOnQueue != "" {
+		if s.queuePush == nil {
+			err = fmt.Errorf("scheduler: QueuePush not configured")
+		} else {
+			err = s.queuePush(runCtx, def.runOnQueue, []byte(def.name))
+		}
+	} else {
+		err = def.fn(runCtx)
+	}
+
+	if s.onRun != nil {
+		s.onRun(def.name, err)
+	}
 	if err != nil {
 		s.emit(runCtx, EventFailed, def.name, err.Error(), err)
+		s.recordHealth(def.name, EventFailed, err.Error())
 		return
 	}
 	s.emit(runCtx, EventFinished, def.name, fmt.Sprintf("%d", time.Since(start).Milliseconds()), nil)
+	s.recordHealth(def.name, EventFinished, fmt.Sprintf("%dms", time.Since(start).Milliseconds()))
 }
 
 func (s *Scheduler) emit(ctx context.Context, name, job, detail string, err error) {

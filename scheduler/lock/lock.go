@@ -17,3 +17,9 @@ type CacheStore interface {
 	Add(ctx context.Context, key string, value []byte, ttl time.Duration) (added bool, err error)
 	Forget(ctx context.Context, key string) error
 }
+
+// RenewableStore extends CacheStore with TTL renewal for long-running jobs.
+type RenewableStore interface {
+	CacheStore
+	Renew(ctx context.Context, key string, value []byte, ttl time.Duration) error
+}

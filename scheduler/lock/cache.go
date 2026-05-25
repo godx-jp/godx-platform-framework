@@ -3,6 +3,7 @@ package lock
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -50,15 +51,43 @@ func NewCache(opts CacheOptions) (*Cache, error) {
 
 // TryAcquire attempts Add on prefix+key. ok is false when another holder exists.
 func (c *Cache) TryAcquire(ctx context.Context, key string) (func() error, bool, error) {
-	added, err := c.store.Add(ctx, c.prefix+key, c.owner, c.ttl)
+	lockKey := c.prefix + key
+	added, err := c.store.Add(ctx, lockKey, c.owner, c.ttl)
 	if err != nil {
 		return nil, false, err
 	}
 	if !added {
 		return nil, false, nil
 	}
-	releaseKey := c.prefix + key
+
+	var stopRenew sync.WaitGroup
+	stop := make(chan struct{})
+	if renewer, ok := c.store.(RenewableStore); ok && c.ttl > 0 {
+		interval := c.ttl / 3
+		if interval < time.Second {
+			interval = time.Second
+		}
+		stopRenew.Add(1)
+		go func() {
+			defer stopRenew.Done()
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					_ = renewer.Renew(context.Background(), lockKey, c.owner, c.ttl)
+				}
+			}
+		}()
+	}
+
 	return func() error {
-		return c.store.Forget(ctx, releaseKey)
+		close(stop)
+		stopRenew.Wait()
+		return c.store.Forget(ctx, lockKey)
 	}, true, nil
 }

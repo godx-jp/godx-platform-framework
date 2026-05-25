@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -32,6 +33,16 @@ func (m *mapCache) Forget(_ context.Context, key string) error {
 	m.mu.Lock()
 	delete(m.data, key)
 	m.mu.Unlock()
+	return nil
+}
+
+func (m *mapCache) Renew(_ context.Context, key string, value []byte, _ time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.data[key]
+	if !ok || string(cur) != string(value) {
+		return fmt.Errorf("renew lost key")
+	}
 	return nil
 }
 
