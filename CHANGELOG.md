@@ -4,6 +4,19 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+### Added
+- `observability/backends/file.go` — Laravel-style local file log driver.
+  - `OBS_BACKEND=file` selects it.
+  - `OBS_LOG_ROTATE`: `none` (Laravel `single` channel) · `daily` (Laravel `daily`) · `size` (rotate by `OBS_LOG_MAX_SIZE_MB`).
+  - `OBS_LOG_MAX_AGE_DAYS`, `OBS_LOG_MAX_BACKUPS`, `OBS_LOG_COMPRESS` for retention.
+  - Parent directory auto-created. Rotation uses `gopkg.in/natefinch/lumberjack.v2`.
+  - Targets zero-budget / bare-metal / VM deployments where no log collector is available.
+- `LoadConfigFromEnv` reads the new `OBS_LOG_*` env vars.
+- New tests under `observability/file_test.go`.
+
+### Changed
+- Roadmap: CloudWatch driver moves from 0.2.0 → 0.3.0; 0.2.0 now plans `httpx` + stack/multi-backend log driver.
+
 ## [0.1.0] — 2026-05-25
 
 ### Added

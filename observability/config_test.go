@@ -18,6 +18,12 @@ func TestLoadConfigFromEnv_Defaults(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "")
 	t.Setenv("AWS_REGION", "")
 	t.Setenv("OBS_LOG_GROUP", "")
+	t.Setenv("OBS_LOG_FILE", "")
+	t.Setenv("OBS_LOG_ROTATE", "")
+	t.Setenv("OBS_LOG_MAX_SIZE_MB", "")
+	t.Setenv("OBS_LOG_MAX_AGE_DAYS", "")
+	t.Setenv("OBS_LOG_MAX_BACKUPS", "")
+	t.Setenv("OBS_LOG_COMPRESS", "")
 
 	cfg := observability.LoadConfigFromEnv()
 	if cfg.Backend != observability.BackendStdout {
@@ -37,6 +43,9 @@ func TestLoadConfigFromEnv_Defaults(t *testing.T) {
 	}
 	if !cfg.OTLPInsecure {
 		t.Errorf("OTLPInsecure = false, want true (default)")
+	}
+	if cfg.FileRotate != "daily" || cfg.FileMaxSizeMB != 100 || cfg.FileMaxAgeDays != 14 || !cfg.FileCompress {
+		t.Errorf("file defaults wrong: %+v", cfg)
 	}
 }
 
@@ -95,6 +104,22 @@ func TestConfig_Validate(t *testing.T) {
 				Backend:     observability.BackendOTLP,
 			},
 			wantErr: true,
+		},
+		{
+			name: "file without path",
+			cfg: observability.Config{
+				ServiceName: "svc",
+				Backend:     observability.BackendFile,
+			},
+			wantErr: true,
+		},
+		{
+			name: "file with path ok",
+			cfg: observability.Config{
+				ServiceName: "svc",
+				Backend:     observability.BackendFile,
+				FilePath:    "/tmp/log.log",
+			},
 		},
 	}
 	for _, tc := range cases {

@@ -42,6 +42,12 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 		OTLPInsecure:    cfg.OTLPInsecure,
 		AWSRegion:       cfg.AWSRegion,
 		LogGroupName:    cfg.LogGroupName,
+		FilePath:        cfg.FilePath,
+		FileRotate:      cfg.FileRotate,
+		FileMaxSizeMB:   cfg.FileMaxSizeMB,
+		FileMaxAgeDays:  cfg.FileMaxAgeDays,
+		FileMaxBackups:  cfg.FileMaxBackups,
+		FileCompress:    cfg.FileCompress,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("observability: backend %q: %w", cfg.Backend, err)

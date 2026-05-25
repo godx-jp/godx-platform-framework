@@ -11,6 +11,7 @@ import (
 // Backend identifiers recognised by [LoadConfigFromEnv].
 const (
 	BackendStdout     = "stdout"
+	BackendFile       = "file"
 	BackendOTLP       = "otlp"
 	BackendCloudWatch = "cloudwatch"
 )
@@ -47,6 +48,15 @@ type Config struct {
 	// CloudWatch-only fields. Reserved for the 0.2.0 cloudwatch backend.
 	AWSRegion    string
 	LogGroupName string
+
+	// File-driver fields. Used when Backend == "file" — Laravel-style
+	// local file logging.
+	FilePath       string // absolute or relative path; parent dir auto-created
+	FileRotate     string // "none" | "daily" | "size"; default "daily"
+	FileMaxSizeMB  int    // size-rotation threshold; default 100
+	FileMaxAgeDays int    // delete rotated files older than N days; 0 = forever
+	FileMaxBackups int    // keep at most N rotated files; 0 = unlimited
+	FileCompress   bool   // gzip rotated files
 }
 
 // LoadConfigFromEnv reads SDK configuration from environment variables.
@@ -62,6 +72,12 @@ type Config struct {
 //	OTEL_EXPORTER_OTLP_INSECURE  true
 //	AWS_REGION                   (empty)
 //	OBS_LOG_GROUP                /service/{ServiceName}
+//	OBS_LOG_FILE                 (empty)
+//	OBS_LOG_ROTATE               daily
+//	OBS_LOG_MAX_SIZE_MB          100
+//	OBS_LOG_MAX_AGE_DAYS         14
+//	OBS_LOG_MAX_BACKUPS          0
+//	OBS_LOG_COMPRESS             true
 //
 // ServiceName / ServiceVersion are not populated by this function; the
 // framework module sets them from [framework.App].
@@ -76,6 +92,12 @@ func LoadConfigFromEnv() Config {
 		OTLPInsecure:    parseBool(getEnv("OTEL_EXPORTER_OTLP_INSECURE", "true"), true),
 		AWSRegion:       os.Getenv("AWS_REGION"),
 		LogGroupName:    os.Getenv("OBS_LOG_GROUP"),
+		FilePath:        os.Getenv("OBS_LOG_FILE"),
+		FileRotate:      getEnv("OBS_LOG_ROTATE", "daily"),
+		FileMaxSizeMB:   parseInt(getEnv("OBS_LOG_MAX_SIZE_MB", "100"), 100),
+		FileMaxAgeDays:  parseInt(getEnv("OBS_LOG_MAX_AGE_DAYS", "14"), 14),
+		FileMaxBackups:  parseInt(getEnv("OBS_LOG_MAX_BACKUPS", "0"), 0),
+		FileCompress:    parseBool(getEnv("OBS_LOG_COMPRESS", "true"), true),
 	}
 	return cfg
 }
@@ -87,12 +109,15 @@ func (c Config) Validate() error {
 		return fmt.Errorf("observability: ServiceName is required")
 	}
 	switch c.Backend {
-	case BackendStdout, BackendOTLP, BackendCloudWatch:
+	case BackendStdout, BackendFile, BackendOTLP, BackendCloudWatch:
 	default:
-		return fmt.Errorf("observability: unknown backend %q (valid: stdout, otlp, cloudwatch)", c.Backend)
+		return fmt.Errorf("observability: unknown backend %q (valid: stdout, file, otlp, cloudwatch)", c.Backend)
 	}
 	if c.Backend == BackendOTLP && c.OTLPEndpoint == "" {
 		return fmt.Errorf("observability: OTLPEndpoint required when backend=otlp (set OTEL_EXPORTER_OTLP_ENDPOINT)")
+	}
+	if c.Backend == BackendFile && c.FilePath == "" {
+		return fmt.Errorf("observability: FilePath required when backend=file (set OBS_LOG_FILE)")
 	}
 	return nil
 }
@@ -119,6 +144,13 @@ func parseLogLevel(s string) slog.Level {
 
 func parseFloat(s string, def float64) float64 {
 	if v, err := strconv.ParseFloat(s, 64); err == nil {
+		return v
+	}
+	return def
+}
+
+func parseInt(s string, def int) int {
+	if v, err := strconv.Atoi(s); err == nil {
 		return v
 	}
 	return def

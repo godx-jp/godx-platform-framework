@@ -82,12 +82,13 @@ app.Shutdown(ctx)
               └─────────┬──────────┘
                         │ Backend interface
                         ▼
-        ┌──────────┬────────────┬───────────────┐
-        │ stdout   │ otlp       │ cloudwatch    │
-        │ (dev)    │ (LGTM/etc) │ (AWS, 0.2.0)  │
-        └──────────┴────────────┴───────────────┘
+  ┌──────────┬───────────────┬────────────┬───────────────┐
+  │ stdout   │ file          │ otlp       │ cloudwatch    │
+  │ (dev,    │ (Laravel-     │ (LGTM,     │ (AWS, 0.3.0)  │
+  │  k8s)    │  style local) │  Datadog…) │               │
+  └──────────┴───────────────┴────────────┴───────────────┘
 
-   selected by:  OBS_BACKEND=stdout|otlp|cloudwatch
+   selected by:  OBS_BACKEND=stdout|file|otlp|cloudwatch
 ```
 
 The application **never** imports an exporter or a vendor SDK. Swapping backends is a deployment configuration change, not a recompile.
@@ -108,8 +109,9 @@ The application **never** imports an exporter or a vendor SDK. Swapping backends
 
 | Version | Modules added |
 |---------|---------------|
-| 0.1.x | `framework`, `observability` (stdout/otlp + cloudwatch stub) |
-| 0.2.x | `observability` cloudwatch driver (AWS ADOT), `httpx` (chi router + handlers) |
-| 0.3.x | `dbx` (sqlc + outbox), `cachex` |
-| 0.4.x | `queuex`, `eventbus` |
+| 0.1.x | `framework`, `observability` (stdout / file / otlp + cloudwatch stub) |
+| 0.2.x | `httpx` (chi router + handlers), stack/multi-backend log driver |
+| 0.3.x | `observability` cloudwatch driver (AWS ADOT) |
+| 0.4.x | `dbx` (sqlc + outbox), `cachex` |
+| 0.5.x | `queuex`, `eventbus` |
 | 1.0.0 | API freeze; semver guarantees for `1.x` |

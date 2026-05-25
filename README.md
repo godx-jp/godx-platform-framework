@@ -16,10 +16,11 @@ Any Go team that wants production-grade observability without writing it from sc
 |-----------|-----------------|
 | A new service | A `framework.New(...).Use(observability.Module).Run(ctx)` boilerplate |
 | Many services across teams | A shared SDK with the same log format, the same trace IDs, the same metric names |
+| **Zero budget / bare metal** | **Log to a local file (Laravel-style `single` / `daily` rotation)** |
 | Self-hosted observability | Point at `godx-platform-observability` via OTLP |
 | AWS-only budget | Point at CloudWatch (one env var change) |
 | Datadog / New Relic licence | Point at their OTLP endpoint (one env var change) |
-| All of the above (dev=self-host, prod=CW) | One binary, env-driven backend selection |
+| All of the above (dev=stdout, staging=file, prod=OTLP) | One binary, env-driven backend selection |
 
 Zero application code change between backends.
 
@@ -52,6 +53,12 @@ func main() {
 # Dev — pretty JSON logs to stdout, no infra needed
 OBS_BACKEND=stdout go run .
 
+# Zero-budget — append JSON lines to a local file (Laravel `single` channel)
+OBS_BACKEND=file OBS_LOG_FILE=./logs/app.log OBS_LOG_ROTATE=none go run .
+
+# Production on bare metal — daily-rotated file, keep 14 days, gzip old
+OBS_BACKEND=file OBS_LOG_FILE=/var/log/app/app.log go run .
+
 # Self-hosted — push to godx-platform-observability
 OBS_BACKEND=otlp \
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 \
@@ -74,11 +81,12 @@ Future modules (roadmap, not in v0.1): `httpx`, `dbx`, `cachex`, `queuex`, `even
 
 ## Backend drivers (observability)
 
-| Driver | `OBS_BACKEND` | Status |
-|--------|---------------|--------|
-| Stdout | `stdout` | ✅ Working — dev / tests |
-| OTLP   | `otlp`   | ✅ Working — godx-platform-observability, Datadog, New Relic, any OTLP receiver |
-| CloudWatch | `cloudwatch` | 🚧 Stub — full impl in 0.2.0 (uses AWS ADOT) |
+| Driver | `OBS_BACKEND` | Status | Use case |
+|--------|---------------|--------|----------|
+| Stdout | `stdout` | ✅ Working | dev, containers (orchestrator collects stdout) |
+| File   | `file`   | ✅ Working | bare-metal / VM, zero-budget, Laravel-style local file (`none` / `daily` / `size` rotation, gzip, retention) |
+| OTLP   | `otlp`   | ✅ Working | godx-platform-observability, Datadog, New Relic, any OTLP receiver |
+| CloudWatch | `cloudwatch` | 🚧 Stub | full impl in 0.3.0 (AWS ADOT) |
 
 Adding a new driver: see [docs/BACKENDS.md](./docs/BACKENDS.md).
 

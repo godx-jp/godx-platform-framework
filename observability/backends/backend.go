@@ -47,6 +47,15 @@ type Spec struct {
 
 	AWSRegion    string
 	LogGroupName string
+
+	// File driver — Laravel-style local file logging with optional
+	// rotation. Ignored by other drivers.
+	FilePath        string
+	FileRotate      string // "none" | "daily" (default) | "size"
+	FileMaxSizeMB   int    // size rotation threshold (default 100)
+	FileMaxAgeDays  int    // delete rotated files older than N days (0 = keep forever)
+	FileMaxBackups  int    // keep at most N rotated files (0 = unlimited)
+	FileCompress    bool   // gzip rotated files
 }
 
 // New constructs the named backend.
@@ -54,6 +63,8 @@ func New(ctx context.Context, s Spec) (Backend, error) {
 	switch s.Name {
 	case "", "stdout":
 		return newStdout(s), nil
+	case "file":
+		return newFile(s)
 	case "otlp":
 		return newOTLP(ctx, s)
 	case "cloudwatch":
