@@ -232,6 +232,23 @@ Driver-name shortcut: when `<NAME>` equals a registered driver name (`env`, `fil
 
 Full reference: [modules/config](./modules/config.md).
 
+## Secrets
+
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `SECRETS_DEFAULT` | string | `env` | Default secrets store name |
+| `SECRETS_STORES` | csv | _default only_ | Ordered store names — each name implies its driver |
+| `SECRETS_PREFIX` | string | _empty_ | Global key prefix applied to every store |
+| `SECRETS_ENV_PREFIX` | string | `SECRETS_` | env-driver-only prefix (use `-` for no prefix) |
+| `SECRETS_FILE_PATH` | path | _required for file driver_ | Root directory holding one file per secret |
+| `SECRETS_VAULT_ADDR` | url | _empty_ | HashiCorp Vault API endpoint |
+| `SECRETS_VAULT_TOKEN` | string | _empty_ | Static Vault token (env also honours `VAULT_TOKEN`) |
+| `SECRETS_VAULT_KV_MOUNT` | string | `secret` | KV-v2 mount path |
+| `SECRETS_GCPSM_PROJECT` | string | _required for gcpsm_ | GCP project id |
+| `SECRETS_AWSSM_REGION` | string | _empty_ (uses `AWS_REGION`) | AWS region override |
+
+Heavy drivers (`vault`, `gcpsm`, `awssm`) require a blank import. See [modules/secrets](./modules/secrets.md).
+
 ## HTTP middleware
 
 | Constant | Default | Purpose |

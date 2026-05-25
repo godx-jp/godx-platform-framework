@@ -3,7 +3,7 @@
 > **Opinionated Go SDK by godx** — modular, OpenTelemetry-native, backend-agnostic.
 > Write once, swap backends (godx-platform-observability ↔ AWS CloudWatch ↔ Datadog ↔ …) by changing one env var.
 
-[![Version](https://img.shields.io/badge/version-0.8.4-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.5-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](./LICENSE)
 [![Maintainer](https://img.shields.io/badge/by-godx-black.svg)](#)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](https://go.dev)
@@ -96,7 +96,7 @@ go run .
 | `hashing` | stable (v0.8.2) | bcrypt · argon2id · scrypt — Laravel `Hash::` parity with `NeedsRehash` |
 | `encryption` | stable (v0.8.3) | aesgcm · chacha20poly1305 — versioned key rotation, Laravel `Crypt::` parity |
 | `pipeline` | stable (v0.8.4) | composable middleware chain — Laravel `Pipeline` parity, generic over T, net/http compat |
-| `secrets` | roadmap (v0.8.5) | env · file · vault · gcpsm · awssm |
+| `secrets` | stable (v0.8.5) | env · file · vault · gcpsm · awssm — uniform Get/Put/Forget |
 | `validation` | roadmap (v0.9.0) | struct-tag DSL, pluggable rule registry, i18n templates |
 | `httpclient` | roadmap (v0.9.1) | stdlib + resilient, OTel auto-instrumentation |
 | `ratelimit` | roadmap (v0.9.2) | memory + redis token bucket + HTTP middleware |
@@ -197,6 +197,33 @@ ttl  := config.Get[time.Duration](cfg, "cache.ttl", 5*time.Minute)
 
 Full reference: [docs/modules/config](./docs/modules/config.md).
 
+## Drivers (secrets)
+
+A **secrets driver** is a Store that fronts one secrets backend behind a uniform `Get` / `Put` / `Forget` / `List` API. Switching between dev (env) and production (vault / cloud KMS) is a configuration change, no code change.
+
+| Driver | Visibility   | Writable     | Listable | Use case |
+|--------|--------------|--------------|----------|----------|
+| Env    | auto         | no           | no       | Local dev — reads `SECRETS_<KEY>` from process env |
+| File   | auto         | yes (atomic) | yes      | Container / K8s — one file per secret under `SECRETS_FILE_PATH` |
+| Vault  | blank-import | yes          | yes      | HashiCorp Vault KV-v2 |
+| GCPSM  | blank-import | yes          | yes      | Google Cloud Secret Manager (ADC) |
+| AWSSM  | blank-import | yes          | yes      | AWS Secrets Manager (`SecretBinary` per key) |
+
+```go
+import (
+    _ "github.com/godx-jp/godx-platform-framework/secrets/drivers/vault"
+    "github.com/godx-jp/godx-platform-framework/framework"
+    "github.com/godx-jp/godx-platform-framework/secrets"
+)
+
+app := framework.New("svc", "1.0.0").Use(secrets.Module)
+_ = app.Init(ctx)
+mgr, _ := secrets.FromApp(app)
+dbPass, _ := mgr.GetString(ctx, "db/password")
+```
+
+Full reference: [docs/modules/secrets](./docs/modules/secrets.md).
+
 ```go
 import (
     "github.com/godx-jp/godx-platform-framework/cache"
@@ -296,6 +323,7 @@ The internal layout of every future module (storage, cache, queue, ...) is ident
 | [modules/hashing](./docs/modules/hashing.md) | App developers using hashing |
 | [modules/encryption](./docs/modules/encryption.md) | App developers using encryption |
 | [modules/pipeline](./docs/modules/pipeline.md) | App developers using pipeline |
+| [modules/secrets](./docs/modules/secrets.md) | App developers using secrets |
 | [CONFIGURATION](./docs/CONFIGURATION.md) | Operators — every env var |
 | [VERSIONING](./docs/VERSIONING.md) | Consumers — SemVer policy |
 

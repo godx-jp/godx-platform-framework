@@ -4,6 +4,54 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.8.5] — 2026-05-25
+
+Ships the `secrets/` module — uniform `Get`/`Put`/`Forget` over environment variables, file mounts, HashiCorp Vault, Google Secret Manager, and AWS Secrets Manager. Sixth release in the Laravel-parity reshuffle and the last of the v0.8.x security & utility primitives wave.
+
+### Added
+
+- **`secrets/` module** — `Manager` owns one or more named `driver.Store` instances. `Default()` returns the primary; `Store(name)` returns a specific one. `Get / Put / Forget` operate on the default store; `GetString / PutString` are bytes-to-string convenience.
+- **`secrets/driver/`** — `Store` interface (`Name / Get / Put / Forget / List / Shutdown`). `Spec` carries per-driver knobs (Address/Token/KVMount for vault, Project for gcpsm, Region for awssm, Path for file). Sentinel errors `ErrNotFound`, `ErrReadOnly`, `ErrListNotSupported`, `ErrClosed`. Registry mirrors the cache/config/hashing shape; unknown-driver errors include a blank-import hint.
+- **`drivers/env`** — auto-registered. Reads `<prefix><UPPERCASED-KEY>` (slashes/dots/dashes/spaces become single underscores; default prefix `SECRETS_`, `-` opts out). Writes return `ErrReadOnly`; list returns `ErrListNotSupported`.
+- **`drivers/file`** — auto-registered. K8s-style — each secret is one file under spec.Path with the trailing newline trimmed on read. Sub-keys map to subdirectories (`Get("db/password")` reads `<root>/db/password`). Atomic writes (temp+rename) with 0600 mode; path-traversal segments (`..`, leading `/`) are rejected. `List` walks the tree recursively.
+- **`drivers/vault`** — heavy, opt-in (`_ "…/secrets/drivers/vault"`). HashiCorp KV-v2 via the official `vault/api` client. Stores values as base64 under a `value` field to support binary; falls back to raw-string read for entries written outside the driver. `Get` maps 404 → `ErrNotFound`. `List` uses the KV-v2 metadata endpoint. Respects standard Vault env vars (`VAULT_ADDR`, `VAULT_TOKEN`) when spec fields are blank.
+- **`drivers/gcpsm`** — heavy, opt-in. Google Secret Manager via the official `secretmanager/apiv1` client (ADC). Logical keys are normalised to GCP-valid secret ids (dashes only). `Put` creates the secret on first write then adds a new version on subsequent writes. `Forget` deletes the secret resource. `List` enumerates secrets in the configured project, filtered by prefix.
+- **`drivers/awssm`** — heavy, opt-in. AWS Secrets Manager via `aws-sdk-go-v2/service/secretsmanager`. Values stored as `SecretBinary`; falls back to `SecretString` on read. `Put` tries `PutSecretValue` first and falls back to `CreateSecret` on `ResourceNotFoundException`. `Forget` uses force-delete (no recovery window). `List` paginates `ListSecrets` and trims the configured prefix.
+- **`secrets.Module`** — env-driven (`SECRETS_DEFAULT`, `SECRETS_STORES`, `SECRETS_PREFIX`, plus per-driver `SECRETS_ENV_PREFIX`, `SECRETS_FILE_PATH`, `SECRETS_VAULT_*`, `SECRETS_GCPSM_PROJECT`, `SECRETS_AWSSM_REGION`). `ModuleWithConfig` for code-driven setup. `FromApp(app)` returns the published Manager.
+- **`examples/secrets/main.go`** — runnable demo with redaction. Shows default env-driver lookup plus instructions to switch to the file driver via env-only changes.
+- **`docs/modules/secrets.md`** — full reference: concepts, driver matrix, key normalisation, mixed-driver deployments, env var reference, Laravel parity notes, security notes, Migrating from go-common section.
+
+### Tests
+
+- **`secrets/driver/registry_test.go`** — Register / Lookup / Names / New round trip; empty-name + nil-constructor panic; unknown-driver error mentions the blank-import path; sentinel errors distinct under `errors.Is`; driver-name constants exposed.
+- **`secrets/conformance_test.go`** — driver-agnostic suite covering Get-missing, Name, seeded-value, idempotent Shutdown that blocks subsequent ops, Put-overwrites + Forget-removes (writable drivers), Put/Forget→`ErrReadOnly` (read-only drivers), List-enumerates (listable drivers), List→`ErrListNotSupported` (non-listable drivers). Runs against `env` (read-only) and `file` (writable).
+- **`secrets/manager_test.go`** — duplicate-name rejection, nil/empty-name rejection, first-add becomes default, unknown-name on SetDefault / Store, no-default error path on Get/Put/Forget, String helpers, sorted Stores(), Shutdown joins per-store errors, default-switch, concurrent access under the race detector.
+- **`secrets/module_test.go`** — wires Manager into App via env, env-built file store reads K8s-style mounts, env defaults / multi-store config, Validate rejects + accepts, duplicate-init rejected, context helpers round-trip, FromApp on un-initialised App errors, driver construction errors bubble up.
+- **`secrets/edges_test.go`** — concurrent reads safe, Shutdown with no stores is a no-op, nil context does not panic, empty-spec driver name rejected at registry level.
+- **`drivers/env/env_test.go`** — default prefix, custom prefix, no-prefix (`-`), key normalisation (slash/dot/dash/space → `_`), missing→`ErrNotFound`, empty key, writes→`ErrReadOnly`, list→`ErrListNotSupported`, post-shutdown→`ErrClosed`, shutdown idempotent, registry constructor.
+- **`drivers/file/file_test.go`** — Put/Get round trip, missing→`ErrNotFound`, empty key, trailing-newline trim, K8s mount style, Forget-missing no-op, Forget removes, path traversal rejected (`../`, leading `/`, sub `../../`), List returns relative keys, List on empty store, Put creates parent dirs, Put overwrites, 0600-mode atomic write, post-shutdown→`ErrClosed`, shutdown idempotent, constructor requires Path, registry constructor with prefix.
+- **`drivers/vault/vault_test.go`** — registered on import, address validation, default-mount construction, idempotent Shutdown, post-shutdown ops return `ErrClosed`.
+- **`drivers/gcpsm/gcpsm_test.go`** — registered on import, project validation, secret-id normalisation (slash/dot/space → `-`, with/without prefix), path helpers, uninitialised-shutdown idempotent + blocks ops.
+- **`drivers/awssm/awssm_test.go`** — registered on import, secret-name normalisation (leading slash trimmed, prefix joined), shutdown idempotent + blocks ops, empty-key handling (Get→`ErrNotFound`, Forget no-op, Put errors), registry constructor exposed.
+
+### Changed
+
+- `docs/CONFIGURATION.md` adds a "Secrets" section listing all `SECRETS_*` environment variables.
+- `docs/ARCHITECTURE.md` repository-layout diagram lists the new `secrets/` tree with its five drivers.
+- `README.md` Modules table shows the secrets module as stable.
+
+### Dependencies
+
+- `github.com/hashicorp/vault/api v1.23.0` (heavy; only pulled in by binaries that blank-import the vault driver).
+- `cloud.google.com/go/secretmanager v1.16.0` promoted from indirect dependency (already in module graph via `cloud.google.com/go`).
+- `github.com/aws/aws-sdk-go-v2/service/secretsmanager` added alongside existing AWS SDK v2 modules.
+
+### Roadmap
+
+- v0.8.x foundation + security/utility primitives wave is complete (config · events · hashing · encryption · pipeline · secrets).
+- v0.9.0 begins the validation + HTTP client + rate limit wave, starting with `validation/` (struct-tag DSL, pluggable rule registry, i18n message templates).
+- Heavy-driver integration tests against LocalStack / Vault dev-server / GCP fixtures are tracked for the broader observability-emulator follow-up.
+
 ## [0.8.4] — 2026-05-25
 
 Ships the `pipeline/` module — Laravel's `Pipeline` facade reimagined for Go with generics. Fifth release in the Laravel-parity reshuffle.
