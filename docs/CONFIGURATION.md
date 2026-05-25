@@ -134,8 +134,8 @@ For each disk `<NAME>` listed in `STORAGE_DISKS`, the module reads env vars pref
 
 | Variable | Type | Default | Driver scope | Purpose |
 |----------|------|---------|--------------|---------|
-| `STORAGE_DISK_<NAME>_DRIVER` | enum | `local` | all | `local` · `memory` · `s3` · `gcs` · `azure` · `minio` |
-| `STORAGE_DISK_<NAME>_ROOT` | string | `./storage` (for `local`) | local | Filesystem root path |
+| `STORAGE_DISK_<NAME>_DRIVER` | enum | `local` | all | `local` · `memory` · `s3` · `minio` · `gcs` · `azure` |
+| `STORAGE_DISK_<NAME>_ROOT` | string | `./storage/app/private` (for `local`) | local | Filesystem root path. Laravel-faithful default — set explicitly to override. The conventional matching "public" disk is rooted at `./storage/app/public`. |
 | `STORAGE_DISK_<NAME>_VISIBILITY` | enum | `private` | local + cloud | Default visibility for writes — `public` or `private` |
 | `STORAGE_DISK_<NAME>_PUBLIC_URL` | string | _unset_ | local + cloud | Base URL for `disk.URL(key)` — e.g. `https://cdn.example.com` |
 | `STORAGE_DISK_<NAME>_BUCKET` | string | _required for cloud_ | s3 · gcs · azure · minio | Bucket / container name |
@@ -148,13 +148,19 @@ For each disk `<NAME>` listed in `STORAGE_DISKS`, the module reads env vars pref
 
 ## Storage — heavy drivers (opt-in)
 
-Heavy drivers (`s3`, `gcs`, `azure`, `minio`) require an explicit blank import in consumer code; the SDK fails fast at boot with a clear hint if you select a heavy driver without importing its package.
+Heavy drivers (`s3`, `minio`, `gcs`, `azure`) require an explicit blank import in consumer code; the SDK fails fast at boot with a clear hint if you select a heavy driver without importing its package.
 
 ```go
 import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/s3"
+import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/minio"
 ```
 
-Through v0.6.0 the heavy drivers are stubs that return `driver.ErrNotImplemented`. The full implementations land in v0.6.x patch releases — track CHANGELOG.
+| Driver | Status (v0.6.1) | Required env keys | Notes |
+|--------|-----------------|--------------------|-------|
+| `s3`   | **stable** | `BUCKET`, `REGION` | Credentials via default AWS chain (env → `~/.aws/credentials` → IRSA → EC2 IMDS); override with `ACCESS_KEY` / `SECRET_KEY` |
+| `minio` | **stable** | `BUCKET`, `ENDPOINT` | Always path-style; `REGION` defaults to `us-east-1`; supply credentials via `ACCESS_KEY` / `SECRET_KEY` |
+| `gcs`  | stub (full impl in a v0.6.x patch) | `BUCKET` | Returns `driver.ErrNotImplemented` until the full driver lands |
+| `azure` | stub (full impl in a v0.6.x patch) | `BUCKET` | Returns `driver.ErrNotImplemented` until the full driver lands |
 
 ## HTTP middleware
 
@@ -221,20 +227,29 @@ OBSERVABILITY_TRACE_SAMPLE_RATE=1.0
 
 # --- Storage (Laravel-style multi-disk; zero env vars ⇒ single local disk) ---
 # STORAGE_DEFAULT_DISK=local
-# STORAGE_DISKS=local,avatars,uploads
+# STORAGE_DISKS=local,public,uploads
 #
+# # Default Laravel local disk
 # STORAGE_DISK_LOCAL_DRIVER=local
-# STORAGE_DISK_LOCAL_ROOT=./storage
+# STORAGE_DISK_LOCAL_ROOT=./storage/app/private
 # STORAGE_DISK_LOCAL_VISIBILITY=private
 #
-# STORAGE_DISK_AVATARS_DRIVER=local
-# STORAGE_DISK_AVATARS_ROOT=./storage/avatars
-# STORAGE_DISK_AVATARS_VISIBILITY=public
-# STORAGE_DISK_AVATARS_PUBLIC_URL=https://cdn.example.com/avatars
+# # Conventional "public" disk (symlinked from web root in production)
+# STORAGE_DISK_PUBLIC_DRIVER=local
+# STORAGE_DISK_PUBLIC_ROOT=./storage/app/public
+# STORAGE_DISK_PUBLIC_VISIBILITY=public
+# STORAGE_DISK_PUBLIC_PUBLIC_URL=http://localhost:8000/storage
 #
-# # Cloud disks (require blank import — see storage docs)
+# # AWS S3 (require: import _ ".../storage/drivers/s3")
 # STORAGE_DISK_UPLOADS_DRIVER=s3
 # STORAGE_DISK_UPLOADS_BUCKET=my-uploads
 # STORAGE_DISK_UPLOADS_REGION=ap-northeast-1
-# STORAGE_DISK_UPLOADS_VISIBILITY=private
+# # Optional: STORAGE_DISK_UPLOADS_PUBLIC_URL=https://cdn.example.com
+#
+# # MinIO / S3-compatible (require: import _ ".../storage/drivers/minio")
+# # STORAGE_DISK_DEVCACHE_DRIVER=minio
+# # STORAGE_DISK_DEVCACHE_BUCKET=uploads
+# # STORAGE_DISK_DEVCACHE_ENDPOINT=http://localhost:9000
+# # STORAGE_DISK_DEVCACHE_ACCESS_KEY=minioadmin
+# # STORAGE_DISK_DEVCACHE_SECRET_KEY=minioadmin
 ```

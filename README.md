@@ -3,7 +3,7 @@
 > **Opinionated Go SDK by godx** — modular, OpenTelemetry-native, backend-agnostic.
 > Write once, swap backends (godx-platform-observability ↔ AWS CloudWatch ↔ Datadog ↔ …) by changing one env var.
 
-[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.1-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](./LICENSE)
 [![Maintainer](https://img.shields.io/badge/by-godx-black.svg)](#)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](https://go.dev)
@@ -89,7 +89,7 @@ go run .
 |--------|--------|---------|
 | `framework` | stable | App backbone — module registration, lifecycle, graceful shutdown |
 | `observability` | stable | Logs (slog JSON) + traces (OTel) + metrics (OTel) + Laravel-style channels |
-| `storage` | stable (v0.6) | object storage — local · memory · s3 · gcs · azure · minio (heavy drivers ship in v0.6.x patches) |
+| `storage` | stable (v0.6) | object storage — local · memory · s3 · minio (stable); gcs · azure (stubs, full impl in v0.6.x patches) |
 | `cache` | roadmap (v0.8) | caching — memory · redis · memcached |
 | `queue` | roadmap (v0.9) | messaging — in-memory · sqs · kafka · nats |
 | `httpx` | roadmap (v0.10) | chi router + handler conventions |
@@ -117,12 +117,12 @@ A **storage driver** is the in-process code that reads/writes objects on a speci
 
 | Driver | `STORAGE_DISK_<NAME>_DRIVER` | Status | Registration | Use case |
 |--------|------------------------------|--------|--------------|----------|
-| Local  | `local`  | stable | auto | filesystem (default — Laravel `local` disk) |
+| Local  | `local`  | stable | auto | filesystem (default — `./storage/app/private` à la Laravel) |
 | Memory | `memory` | stable | auto | tests, ephemeral fixtures |
-| S3     | `s3`     | stub (full impl in v0.6.x) | opt-in (`_ "...drivers/s3"`) | AWS S3 |
+| S3     | `s3`     | stable (v0.6.1) | opt-in (`_ "...drivers/s3"`) | AWS S3 — multipart streaming, presigned URLs |
+| MinIO  | `minio`  | stable (v0.6.1) | opt-in (`_ "...drivers/minio"`) | MinIO / S3-compatible (R2, DO Spaces, …) — path-style by default |
 | GCS    | `gcs`    | stub (full impl in v0.6.x) | opt-in (`_ "...drivers/gcs"`) | Google Cloud Storage |
 | Azure  | `azure`  | stub (full impl in v0.6.x) | opt-in (`_ "...drivers/azure"`) | Azure Blob Storage |
-| MinIO  | `minio`  | stub (full impl in v0.6.x) | opt-in (`_ "...drivers/minio"`) | MinIO / S3-compatible |
 
 Each disk has its own visibility default (`public`/`private`), public URL base, and (for cloud) bucket/region/credentials. Multiple disks live side by side under one `Manager`: `mgr.Disk("avatars").Put(...)`. Full reference: [docs/modules/storage](./docs/modules/storage.md).
 
@@ -163,7 +163,9 @@ godx-platform-framework/
 │   ├── driver/                         Public driver contract (interface, Spec, registry)
 │   └── drivers/
 │       ├── local/ · memory/            light, auto-registered
-│       └── s3/ · gcs/ · azure/ · minio/  heavy, opt-in blank import (stubs in v0.6.0)
+│       ├── internal/s3core/            shared S3 protocol impl (used by s3 + minio)
+│       ├── s3/ · minio/                heavy, opt-in blank import — stable (v0.6.1)
+│       └── gcs/ · azure/               heavy, opt-in blank import — stubs (full impl in v0.6.x)
 ├── examples/
 │   ├── minimal/                        25-line example
 │   └── http-server/                    HTTP server with traced handler + middleware

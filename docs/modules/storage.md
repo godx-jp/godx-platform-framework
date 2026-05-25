@@ -150,12 +150,12 @@ disk.Put(ctx, "report.pdf", body,
 
 | Driver | Status | Registration | Notes |
 |--------|--------|--------------|-------|
-| `local` | stable | auto | Filesystem with `..` traversal guard; visibility maps to file mode (`0644` public / `0600` private) |
+| `local` | stable | auto | Filesystem with `..` traversal guard; visibility maps to file mode (`0644` public / `0600` private). Default root: `./storage/app/private` (Laravel-faithful) |
 | `memory` | stable | auto | In-memory map; `Shutdown` clears all objects. Ideal for tests |
-| `s3` | stub (v0.6.0) → full (v0.6.x) | opt-in (`_ "...drivers/s3"`) | AWS S3 |
-| `gcs` | stub | opt-in (`_ "...drivers/gcs"`) | Google Cloud Storage |
-| `azure` | stub | opt-in (`_ "...drivers/azure"`) | Azure Blob Storage |
-| `minio` | stub | opt-in (`_ "...drivers/minio"`) | MinIO / S3-compatible (defaults `UsePathStyle=true`, requires `ENDPOINT`) |
+| `s3` | **stable (v0.6.1)** | opt-in (`_ "...drivers/s3"`) | AWS S3 via `aws-sdk-go-v2` — multipart streaming, presigned URLs, default credential chain |
+| `minio` | **stable (v0.6.1)** | opt-in (`_ "...drivers/minio"`) | MinIO / S3-compatible (R2, DO Spaces) — shares impl with `s3`; defaults `UsePathStyle=true`, requires `ENDPOINT` |
+| `gcs` | stub | opt-in (`_ "...drivers/gcs"`) | Google Cloud Storage — full impl lands in a v0.6.x patch |
+| `azure` | stub | opt-in (`_ "...drivers/azure"`) | Azure Blob Storage — full impl lands in a v0.6.x patch |
 
 **Light** drivers (`local`, `memory`) are auto-registered when you `import "...storage"`.
 
@@ -166,6 +166,73 @@ import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/s3"
 ```
 
 Selecting a heavy driver without importing it fails at module init with a hint that names the missing import path.
+
+### S3 driver (AWS)
+
+```go
+import (
+    _ "github.com/godx-jp/godx-platform-framework/storage/drivers/s3"
+    "github.com/godx-jp/godx-platform-framework/framework"
+    "github.com/godx-jp/godx-platform-framework/storage"
+)
+
+app := framework.New("svc", "1.0.0").Use(storage.Module)
+```
+
+```bash
+STORAGE_DEFAULT_DISK=uploads
+STORAGE_DISKS=uploads
+STORAGE_DISK_UPLOADS_DRIVER=s3
+STORAGE_DISK_UPLOADS_BUCKET=my-uploads
+STORAGE_DISK_UPLOADS_REGION=ap-northeast-1
+# Credentials are resolved from the default AWS chain
+# (env → ~/.aws/credentials → IRSA → EC2 IMDS).
+# Override only when you have a static key pair:
+# STORAGE_DISK_UPLOADS_ACCESS_KEY=AKIA…
+# STORAGE_DISK_UPLOADS_SECRET_KEY=…
+# STORAGE_DISK_UPLOADS_PUBLIC_URL=https://cdn.example.com  # for disk.URL()
+```
+
+Writes stream through the SDK's multipart uploader so arbitrary object sizes work without buffering. `disk.TemporaryURL(ctx, key, 5*time.Minute)` issues a presigned GET via the SDK's PresignClient.
+
+### MinIO driver (and any S3-compatible store)
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/minio"
+```
+
+```bash
+STORAGE_DEFAULT_DISK=cache
+STORAGE_DISKS=cache
+STORAGE_DISK_CACHE_DRIVER=minio
+STORAGE_DISK_CACHE_BUCKET=uploads
+STORAGE_DISK_CACHE_ENDPOINT=http://localhost:9000
+STORAGE_DISK_CACHE_ACCESS_KEY=minioadmin
+STORAGE_DISK_CACHE_SECRET_KEY=minioadmin
+# STORAGE_DISK_CACHE_REGION=us-east-1  # defaulted by the driver
+# STORAGE_DISK_CACHE_PUBLIC_URL=http://localhost:9000/uploads
+```
+
+Path-style addressing is forced on (MinIO needs it under the standard `:9000` endpoint). The driver shares 100 % of its implementation with `s3` via the internal `s3core` package, so feature parity is automatic — multipart uploads, presigned URLs, the lot.
+
+For Cloudflare R2 / DigitalOcean Spaces / any other S3-compatible store: pick whichever wrapper feels right (`minio` is the more lenient pick because it forces path-style); set `ENDPOINT`, `ACCESS_KEY`, `SECRET_KEY`, and `BUCKET` accordingly.
+
+### Live integration test (MinIO via docker)
+
+```bash
+docker run --rm -d --name minio-dev -p 9000:9000 -p 9001:9001 \
+    -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+    quay.io/minio/minio server /data --console-address :9001
+docker exec minio-dev mc alias set local http://127.0.0.1:9000 minioadmin minioadmin
+docker exec minio-dev mc mb local/godx-test
+
+go test -tags integration -run TestS3Core_Integration_MinIO \
+    ./storage/drivers/internal/s3core/
+
+docker stop minio-dev
+```
+
+The test does a full round trip: write a small object, head it, read it back, request a presigned URL, delete it, then verify a second delete returns `ErrNotFound`.
 
 ## Error model
 

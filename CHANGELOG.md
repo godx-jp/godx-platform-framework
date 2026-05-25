@@ -4,6 +4,39 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-05-25
+
+Heavy storage drivers, round 1 — AWS S3 and MinIO (any S3-compatible store) now ship as real, production-grade implementations instead of stubs. Backward-compatible for v0.6.0 consumers that did not yet rely on the stubbed heavy drivers; the only behaviour change is the Laravel-faithful local-disk default root.
+
+### Added — `s3` and `minio` drivers (full implementations)
+
+- **`storage/drivers/internal/s3core`** — shared S3-protocol driver built on `github.com/aws/aws-sdk-go-v2`. Implements every storage.Driver method end-to-end:
+  - `NewReader` / `NewWriter` — the writer pipes into `feature/s3/manager.Uploader`, so writes of arbitrary size stream as a multipart upload without buffering the whole body in memory.
+  - `Delete` — does a pre-flight `HeadObject` so missing keys surface as `driver.ErrNotFound` (vanilla S3 `DeleteObject` is idempotent and would otherwise mask the miss).
+  - `Exists` / `Attributes` — single `HeadObject` round trip; returns the canonical metadata record (Size, LastModified, ContentType, ETag, user metadata).
+  - `List` — `ListObjectsV2` with `Delimiter="/"`, returning files plus synthetic directory entries built from `CommonPrefixes`. Matches the local/memory `List` semantics exactly.
+  - `URL` — concatenates `Spec.PublicURL` + key (URL-encoded). Returns `driver.ErrNotSupported` when no PublicURL is configured.
+  - `SignedURL` — presigned GET via the SDK's `PresignClient`; default expiry 15 minutes.
+- **Compatibility profiles** — a `Profile` parameter selects defaults:
+  - `ProfileAWS` (virtual-hosted-style addressing, AWS regional endpoint when none supplied) for the `s3` driver.
+  - `ProfileMinIO` (path-style forced, endpoint required, region defaults to `us-east-1`) for the `minio` driver.
+  Both wrappers (`storage/drivers/s3`, `storage/drivers/minio`) are 5-line files that delegate everything to `s3core.NewConstructor(<profile>)`. The same impl already covers Cloudflare R2, DigitalOcean Spaces, Backblaze B2, and any other S3-compatible store via the `minio` wrapper.
+- **Credentials** — the SDK's default credential chain (env → `~/.aws/credentials` → IRSA → EC2 IMDS) is used unless `Spec.AccessKey` + `Spec.SecretKey` are set explicitly. `Spec.SessionToken` is honoured for STS short-term credentials.
+- **Tests** —
+  - 10 new unit tests in `s3core` that drive the implementation through an in-memory fake `API` (no network, no docker). Cover round-trip, ACL mapping, metadata/content-type/cache-control forwarding, list grouping by directory, public/signed URL paths, and required-field validation for both profiles. Race-clean.
+  - New integration test `TestS3Core_Integration_MinIO` behind `//go:build integration` that runs against a real MinIO. Verified live: bucket `mb` → `PutObject` via the multipart uploader → `HeadObject` → `GetObject` → `PresignGetObject` → `DeleteObject` → second delete returns `ErrNotFound`. Boot instructions in the file header.
+  - Wrapper tests in `drivers/s3` and `drivers/minio` confirm auto-registration on blank import and surface clear errors for missing required fields (bucket, region, endpoint).
+
+### Changed — Laravel-faithful local-disk default (minor breaking)
+
+- `STORAGE_DISK_<NAME>_ROOT` for the `local` driver now defaults to `./storage/app/private` instead of `./storage`. Mirrors Laravel's bare-install `storage_path('app/private')`. The conventional matching `public` disk is rooted at `./storage/app/public`, with `VISIBILITY=public` and a `PUBLIC_URL` so `disk.URL()` works.
+- Existing consumers that relied on the previous bare `./storage` root must set `STORAGE_DISK_<NAME>_ROOT=./storage` explicitly, or migrate their on-disk layout to `./storage/app/private`. Documented in CONFIGURATION and modules/storage.
+
+### Roadmap
+
+- v0.6.x continues: `gcs` and `azure` drivers move from stub to full impl in subsequent patches.
+- v0.7.x remains the CloudWatch observability driver.
+
 ## [0.6.0] — 2026-05-25
 
 Storage-module release — adds a Laravel `Storage`-style multi-disk file/object abstraction. **Additive only** for existing consumers (observability is unchanged); the new `storage` module is opt-in via `app.Use(storage.Module)`.

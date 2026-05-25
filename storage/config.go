@@ -73,8 +73,9 @@ type Config struct {
 }
 
 // LoadConfigFromEnv builds a Config from the process environment.
-// Falls back to a single "local" disk rooted at "./storage" when
-// nothing is configured — matches Laravel's out-of-the-box behaviour.
+// Falls back to a single "local" disk rooted at "./storage/app/private"
+// when nothing is configured — matches Laravel's out-of-the-box default
+// disk (`storage_path('app/private')`).
 func LoadConfigFromEnv() Config {
 	defaultDisk := strings.TrimSpace(os.Getenv(EnvDefaultDisk))
 	if defaultDisk == "" {
@@ -107,7 +108,11 @@ func LoadDiskConfigFromEnv(name string) DiskConfig {
 	}
 	root := get("ROOT")
 	if root == "" && driverName == "local" {
-		root = "./storage"
+		// Laravel-faithful default: the "local" disk is the private
+		// per-app directory under ./storage/app/private. The matching
+		// public disk (visibility=public, public URL) is conventionally
+		// rooted at ./storage/app/public. See docs/modules/storage.md.
+		root = "./storage/app/private"
 	}
 	vis := driver.Visibility(strings.ToLower(get("VISIBILITY")))
 	usePathStyle, _ := strconv.ParseBool(get("USE_PATH_STYLE"))

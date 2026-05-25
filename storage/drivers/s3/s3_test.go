@@ -2,23 +2,41 @@ package s3_test
 
 import (
 	"context"
-	"errors"
+	"strings"
 	"testing"
 
 	"github.com/godx-jp/godx-platform-framework/storage/driver"
 	_ "github.com/godx-jp/godx-platform-framework/storage/drivers/s3"
 )
 
-// Heavy-driver stubs must register themselves so misconfigurations
-// surface as a clear ErrNotImplemented rather than the unknown-driver
-// hint. When the full implementation lands, this test flips to a
-// real-construction smoke test.
-func TestS3_StubReturnsNotImplemented(t *testing.T) {
-	_, err := driver.New(context.Background(), driver.Spec{Name: driver.DriverS3, Bucket: "b"})
-	if err == nil {
-		t.Fatal("expected error from s3 stub")
+// The full s3 implementation is exercised by storage/drivers/internal
+// /s3core via the fake API. These tests verify that the wrapper
+// registers the driver under the expected name and surfaces clear
+// errors for required-field misconfiguration.
+func TestS3_RegistersUnderName(t *testing.T) {
+	names := driver.Names()
+	found := false
+	for _, n := range names {
+		if n == driver.DriverS3 {
+			found = true
+			break
+		}
 	}
-	if !errors.Is(err, driver.ErrNotImplemented) {
-		t.Fatalf("want ErrNotImplemented, got %v", err)
+	if !found {
+		t.Fatalf("s3 driver must auto-register on blank import; have %v", names)
+	}
+}
+
+func TestS3_BucketRequired(t *testing.T) {
+	_, err := driver.New(context.Background(), driver.Spec{Name: driver.DriverS3, Region: "ap-northeast-1"})
+	if err == nil || !strings.Contains(err.Error(), "bucket is required") {
+		t.Fatalf("want bucket-required error, got %v", err)
+	}
+}
+
+func TestS3_RegionRequired(t *testing.T) {
+	_, err := driver.New(context.Background(), driver.Spec{Name: driver.DriverS3, Bucket: "b"})
+	if err == nil || !strings.Contains(err.Error(), "region is required") {
+		t.Fatalf("want region-required error, got %v", err)
 	}
 }

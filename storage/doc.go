@@ -36,5 +36,9 @@
 //	body, _ := disk.Get(ctx, "hello.txt")
 //
 // Default behaviour with zero env vars set: one disk named "local"
-// rooted at "./storage", VisibilityPrivate.
+// rooted at "./storage/app/private", VisibilityPrivate — mirrors
+// Laravel's bare `storage_path('app/private')` layout. The matching
+// public disk (visibility=public, with PublicURL) is conventionally
+// rooted at "./storage/app/public"; declare it explicitly via
+// STORAGE_DISKS=local,public + STORAGE_DISK_PUBLIC_* env vars.
 package storage

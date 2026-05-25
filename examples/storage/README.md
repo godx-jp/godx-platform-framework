@@ -23,9 +23,11 @@ STORAGE_DISK_CACHE_DRIVER=memory \
 go run ./examples/storage
 ```
 
-## Heavy drivers (S3 / GCS / Azure / MinIO)
+## Heavy drivers
 
-Add the matching blank import to `main.go` and configure with env vars. Through v0.6.0 the heavy drivers are stubs that return `driver.ErrNotImplemented`; the full implementations land in v0.6.x patches.
+Add the matching blank import to `main.go` and configure with env vars.
+
+### AWS S3 (stable v0.6.1)
 
 ```go
 import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/s3"
@@ -40,6 +42,37 @@ STORAGE_DISK_S3_REGION=ap-northeast-1 \
 AWS_PROFILE=dev \
 go run ./examples/storage
 ```
+
+### MinIO / S3-compatible (stable v0.6.1)
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/minio"
+```
+
+Boot MinIO once:
+
+```bash
+docker run --rm -d --name minio-dev -p 9000:9000 -p 9001:9001 \
+    -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+    quay.io/minio/minio server /data --console-address :9001
+docker exec minio-dev mc alias set local http://127.0.0.1:9000 minioadmin minioadmin
+docker exec minio-dev mc mb local/uploads
+```
+
+```bash
+STORAGE_DEFAULT_DISK=mc \
+STORAGE_DISKS=mc \
+STORAGE_DISK_MC_DRIVER=minio \
+STORAGE_DISK_MC_BUCKET=uploads \
+STORAGE_DISK_MC_ENDPOINT=http://localhost:9000 \
+STORAGE_DISK_MC_ACCESS_KEY=minioadmin \
+STORAGE_DISK_MC_SECRET_KEY=minioadmin \
+go run ./examples/storage
+```
+
+### GCS / Azure (stubs)
+
+These still return `driver.ErrNotImplemented` through v0.6.x until their full implementations land.
 
 ## See also
 
