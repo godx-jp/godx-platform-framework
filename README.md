@@ -3,7 +3,7 @@
 > **Opinionated Go SDK by godx** — modular, OpenTelemetry-native, backend-agnostic.
 > Write once, swap backends (godx-platform-observability ↔ AWS CloudWatch ↔ Datadog ↔ …) by changing one env var.
 
-[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](./LICENSE)
 [![Maintainer](https://img.shields.io/badge/by-godx-black.svg)](#)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](https://go.dev)
@@ -91,9 +91,24 @@ go run .
 | `observability` | stable | Logs (slog JSON) + traces (OTel) + metrics (OTel) + Laravel-style channels |
 | `storage` | stable (v0.6.x) | object storage — local · memory · s3 · minio · gcs · azure (all six stable) |
 | `cache` | stable (v0.7.0) | Laravel-style cache — memory · file · redis (DB-backed cache intentionally out of scope) |
-| `observability/cloudwatch` | roadmap (v0.8) | full AWS CloudWatch driver for observability (stub today) |
-| `queue` | roadmap (v0.9) | messaging — in-memory · sqs · kafka · nats |
-| `httpx` | roadmap (v0.10) | chi router + handler conventions |
+| `config` | stable (v0.8.0) | layered configuration repository — env · file (yaml/json/toml) · static · remote (heavy, roadmap) |
+| `events` | roadmap (v0.8.1) | sync + async dispatcher, wildcard listeners |
+| `hashing` | roadmap (v0.8.2) | bcrypt · argon2id · scrypt — Laravel `Hash::` parity |
+| `encryption` | roadmap (v0.8.3) | aesgcm · chacha20poly1305 — versioned key rotation, Laravel `Crypt::` parity |
+| `pipeline` | roadmap (v0.8.4) | composable middleware chain — Laravel `Pipeline` parity |
+| `secrets` | roadmap (v0.8.5) | env · file · vault · gcpsm · awssm |
+| `validation` | roadmap (v0.9.0) | struct-tag DSL, pluggable rule registry, i18n templates |
+| `httpclient` | roadmap (v0.9.1) | stdlib + resilient, OTel auto-instrumentation |
+| `ratelimit` | roadmap (v0.9.2) | memory + redis token bucket + HTTP middleware |
+| `mail` | roadmap (v0.10.0) | log · smtp · ses · sendgrid · mailgun · postmark |
+| `notifications` | roadmap (v0.10.1) | mail · slack · discord · webhook · database · log channels |
+| `scheduler` | roadmap (v0.10.2) | cron expressions, distributed lock via cache module |
+| `featureflag` | roadmap (v0.10.3) | config · openfeature · launchdarkly · unleash · flagsmith |
+| `resilience` | roadmap (v0.10.4) | retry · circuit-breaker · timeout · bulkhead primitives |
+| `queue` | roadmap (v0.11) | messaging — memory · sqs · kafka · nats |
+| `httpx` | roadmap (v0.12) | chi router + handler conventions |
+| `observability/cloudwatch` | roadmap (v0.13) | full AWS CloudWatch driver for observability (stub today) |
+| `health` | roadmap (v0.14) | `/healthz`, `/readyz`, dependency probes |
 
 Every module follows the [driver pattern](./docs/DRIVER_PATTERN.md): top-level package, public `driver/` contract, per-implementation `drivers/<name>/` package, optional `middleware/` sub-package.
 
@@ -155,6 +170,33 @@ A **cache driver** is the in-process code that reads/writes ephemeral key/value 
 
 Database-backed cache is intentionally out of scope — see [docs/modules/cache § Why no DB driver](./docs/modules/cache.md#why-no-db-driver).
 
+## Drivers (config)
+
+A **config driver** is a Source that contributes one tree of key/value pairs to the layered repository — selected once at deploy time via per-source env vars. Sources merge in registration order (last source wins); the auto-env source is appended after every configured source so process env always overrides files.
+
+| Driver | `CONFIG_SOURCE_<NAME>_DRIVER` | Status | Registration | Use case |
+|--------|-------------------------------|--------|--------------|----------|
+| Env    | `env`    | stable | auto | Read from `os.Environ()` with optional prefix; nested via `__` |
+| File   | `file`   | stable | auto | YAML / JSON / TOML on disk; optional `Watcher` polls mtime |
+| Static | `static` | stable | auto | In-process map, primarily for tests and compile-time defaults |
+| Remote | `remote` | roadmap | opt-in (`_ "...config/drivers/remote/<name>"`) | etcd / consul / vault — full impl in a follow-up release |
+
+```go
+import (
+    "github.com/godx-jp/godx-platform-framework/config"
+    "github.com/godx-jp/godx-platform-framework/framework"
+)
+
+app := framework.New("svc", "1.0.0").Use(config.Module)
+_ = app.Init(ctx)
+
+cfg, _ := config.FromApp(app)
+port := cfg.GetInt("server.port", 8080)
+ttl  := config.Get[time.Duration](cfg, "cache.ttl", 5*time.Minute)
+```
+
+Full reference: [docs/modules/config](./docs/modules/config.md).
+
 ```go
 import (
     "github.com/godx-jp/godx-platform-framework/cache"
@@ -208,6 +250,11 @@ godx-platform-framework/
 │   └── drivers/
 │       ├── memory/ · file/             light, auto-registered
 │       └── redis/                      heavy, opt-in blank import — stable (v0.7.0)
+├── config/                             Layered configuration repository
+│   ├── driver/                         Public driver contract (Source, Watcher, Spec, registry)
+│   └── drivers/
+│       ├── env/ · file/ · static/      light, auto-registered
+│       └── remote/                     heavy, opt-in blank import — roadmap
 ├── examples/
 │   ├── minimal/                        25-line example
 │   ├── http-server/                    HTTP server with traced handler + middleware
@@ -244,6 +291,7 @@ The internal layout of every future module (storage, cache, queue, ...) is ident
 | [modules/observability](./docs/modules/observability.md) | App developers using observability |
 | [modules/storage](./docs/modules/storage.md) | App developers using storage |
 | [modules/cache](./docs/modules/cache.md) | App developers using cache |
+| [modules/config](./docs/modules/config.md) | App developers using config |
 | [CONFIGURATION](./docs/CONFIGURATION.md) | Operators — every env var |
 | [VERSIONING](./docs/VERSIONING.md) | Consumers — SemVer policy |
 

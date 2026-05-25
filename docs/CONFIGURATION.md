@@ -205,6 +205,33 @@ import _ "github.com/godx-jp/godx-platform-framework/cache/drivers/redis"
 | `file`   | **stable** | `PATH` (defaulted) | One *.cache file per key, JSON envelope. Atomic via tmp+rename. Light |
 | `redis`  | **stable** | `URL` _or_ `ADDRESS` | Native INCRBY for atomic counters. Prefix-scoped Flush via SCAN+UNLINK. Heavy |
 
+## Config — common
+
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CONFIG_SOURCES` | csv | _empty_ | Ordered source names (e.g. `defaults,site`) |
+| `CONFIG_AUTO_ENV` | bool | `true` | Append implicit env source after the chain so process env wins |
+| `CONFIG_ENV_PREFIX` | string | _empty_ | Filter the implicit env source (only `<PREFIX>*` vars participate) |
+
+## Config — per-source env vars
+
+For each entry in `CONFIG_SOURCES`, replace `<NAME>` with the uppercase, hyphen-to-underscore form of the source name.
+
+| Variable | Type | Default | Drivers using it |
+|----------|------|---------|------------------|
+| `CONFIG_SOURCE_<NAME>_DRIVER` | enum | inferred from name when possible, else `file` | every |
+| `CONFIG_SOURCE_<NAME>_PREFIX` | string | _empty_ | `env` (var prefix), `remote` (node prefix) |
+| `CONFIG_SOURCE_<NAME>_PATH` | string | _required for `file`_ | `file` |
+| `CONFIG_SOURCE_<NAME>_FORMAT` | enum | _inferred from path extension_ | `file` (`yaml`/`json`/`toml`) |
+| `CONFIG_SOURCE_<NAME>_OPTIONAL` | bool | `false` | `file` (missing path → empty tree) |
+| `CONFIG_SOURCE_<NAME>_URL` | string | _empty_ | `remote` |
+| `CONFIG_SOURCE_<NAME>_ADDRESS` | string | _empty_ | `remote` |
+| `CONFIG_SOURCE_<NAME>_TOKEN` | string | _empty_ | `remote` |
+
+Driver-name shortcut: when `<NAME>` equals a registered driver name (`env`, `file`, `static`, `remote`) and `_DRIVER` is unset, the driver is inferred. So `CONFIG_SOURCES=file` resolves to `CONFIG_SOURCE_FILE_DRIVER=file`.
+
+Full reference: [modules/config](./modules/config.md).
+
 ## HTTP middleware
 
 | Constant | Default | Purpose |

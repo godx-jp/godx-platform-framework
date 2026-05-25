@@ -48,9 +48,18 @@ godx-platform-framework/
 │       ├── memory/ · file/             (light — auto-registered)
 │       └── redis/                      (heavy — opt-in; go-redis/v9)
 │
-├── cache/                              Future — same skeleton (driver/, drivers/memory|redis/, ...)
-├── queue/                              Future
-├── httpx/                              Future
+├── config/                             Layered configuration repository (v0.8.0)
+│   ├── driver/                         Public driver contract (Source, Watcher, Spec, registry)
+│   └── drivers/
+│       ├── env/ · file/ · static/      (light — auto-registered)
+│       └── remote/                     (heavy — opt-in; roadmap — etcd / consul / vault)
+│
+├── events/ hashing/ encryption/ pipeline/ secrets/      Future (v0.8.x security & utility primitives)
+├── validation/ httpclient/ ratelimit/                   Future (v0.9.x)
+├── mail/ notifications/ scheduler/ featureflag/ resilience/  Future (v0.10.x)
+├── queue/                              Future (v0.11)
+├── httpx/                              Future (v0.12)
+├── health/                             Future (v0.14)
 │
 ├── examples/                           Runnable programs — minimal, http-server, …
 └── docs/                               This directory
@@ -178,7 +187,7 @@ The same pattern repeats for every future module — see [DRIVER_PATTERN](./DRIV
 
 - Not a full DI framework. No reflective wiring, no service graphs. If you need that, use [uber-go/fx](https://github.com/uber-go/fx).
 - Not an HTTP framework. The `observability/middleware` sub-package is `net/http`-compatible; bring your own router (chi, echo, gin, mux, ...).
-- Not a config framework (yet). v0.4 reads from env only; a richer config module is on the roadmap.
+- Not a config framework with schema validation. v0.8.0 ships a layered repository with typed accessors; schema validation is the `validation` module's job (v0.9.0).
 
 ## Roadmap
 
@@ -191,7 +200,11 @@ The same pattern repeats for every future module — see [DRIVER_PATTERN](./DRIV
 | 0.5.x | channel maturity | per-channel level filter, env-driven channels (`ChannelsFromEnv()`), per-sub stack level (`stdout:info,file:warn`) — Laravel `config/logging.php` parity |
 | 0.6.x | **`storage` module — complete** | Laravel `Storage` parity. v0.6.0: local + memory · v0.6.1: s3 + minio (shared `internal/s3core`) · **v0.6.2: gcs + azure**. All six drivers stable; module closes at 0.6.2 |
 | 0.7.x | **`cache` module — shipped** | Laravel `Cache` parity. **v0.7.0: memory + file + redis** (Manager + Store + JSON helpers + atomic counters + per-key locking for file). DB-backed cache intentionally out of scope |
-| 0.8.x | `cloudwatch` driver | AWS ADOT exporters; configurable correlation header |
-| 0.9.x | `queue` module | drivers: in-memory · sqs · kafka · nats |
-| 0.10.x | `httpx` module | chi router + handler conventions |
+| **0.8.x** | **Foundation + security/utility primitives — Laravel-parity reshuffle** | **0.8.0: `config` (env/file/static/remote)** · 0.8.1: `events` · 0.8.2: `hashing` (bcrypt/argon2id/scrypt) · 0.8.3: `encryption` (aesgcm/chacha20poly1305) · 0.8.4: `pipeline` · 0.8.5: `secrets` (env/file/vault/gcpsm/awssm) |
+| 0.9.x | Validation + HTTP client + rate limit | 0.9.0: `validation` (struct-tag DSL + i18n) · 0.9.1: `httpclient` (stdlib + resilient + OTel) · 0.9.2: `ratelimit` (memory + redis token bucket + middleware) |
+| 0.10.x | Mail + notifications + scheduling + feature flags + resilience | 0.10.0: `mail` (log/smtp/ses/sendgrid/mailgun/postmark) · 0.10.1: `notifications` · 0.10.2: `scheduler` · 0.10.3: `featureflag` · 0.10.4: `resilience` |
+| 0.11.x | `queue` module | drivers: memory · sqs · kafka · nats (lifecycle hooks via events module) |
+| 0.12.x | `httpx` module | chi router + handler conventions; integrates pipeline / validation / ratelimit middleware |
+| 0.13.x | `cloudwatch` driver | full AWS ADOT impl (replaces the stub) |
+| 0.14.x | `health` module | `/healthz`, `/readyz`, dependency probes |
 | 1.0.0 | API freeze | SemVer guarantees for `1.x` |

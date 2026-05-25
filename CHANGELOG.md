@@ -4,6 +4,40 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-25
+
+Foundation release for the Laravel-parity roadmap. Ships the `config/` module — a layered configuration repository with typed accessors and pluggable sources. Module skeleton is the same shape as `cache/` and `storage/` so adding new sources stays mechanical.
+
+### Added
+
+- **`config/` module** — `Repository` with `Get / GetString / GetInt / GetBool / GetFloat / GetDuration / GetSlice / GetStringSlice / GetMap / Set / Forget / Has / All / AllFlat` typed accessors plus the generic `config.Get[T](repo, key, def)` helper. Dot-separated nested keys. Concurrency-safe.
+- **`config/manager.go`** — multi-source `Manager` that merges layers in registration order (last source wins). Stable `Repository` pointer across `Reload`s; `OnChange` callback fan-out; cleanly handles `AddSource` rollback when a new source's Load errors.
+- **`config/driver/`** — public contract: `Source`, optional `Watcher`, `Spec`, `Constructor`, plus sentinel errors (`ErrNotSupported`, `ErrClosed`, `ErrFileMissing`, `ErrUnsupportedFormat`) and the standard `Register / Lookup / Names / New` registry that mirrors `cache/driver/registry.go` shape for shape (and now 100 % covered by `registry_test.go`).
+- **`config/drivers/env`** — light, auto-registered. Strips `Spec.Prefix`, lowercases, splits `__` to dots. Configurable separator via the manual `env.New(prefix, separator)` constructor.
+- **`config/drivers/file`** — light, auto-registered. YAML (`gopkg.in/yaml.v3`), JSON (stdlib), TOML (`github.com/BurntSushi/toml`). Format inferred from extension or set explicitly via `Spec.Format`. Implements `Watcher` via a 1-second mtime poll — zero `fsnotify` dependency, works on every OS.
+- **`config/drivers/static`** — in-process map source for tests and compile-time defaults. Exposes `Update(map[string]any)` for live mutation.
+- **`config/module.go`** — `config.Module` reads `Config` from env (`CONFIG_SOURCES`, `CONFIG_AUTO_ENV`, `CONFIG_ENV_PREFIX`, plus per-source `CONFIG_SOURCE_<NAME>_*`) and publishes `*Manager` under `config.StoreKey`. `ModuleWithConfig(cfg)` for code-driven wiring. Auto-env source appended last so process env always overrides files (matches Laravel `.env` precedence).
+- **`examples/config/main.go`** — runnable demo covering env-only, file-only, and layered file+env-override flows.
+- **`docs/modules/config.md`** — full module reference: env table, driver matrix, typed accessor table, Laravel API mapping, and a "Migrating from go-common" section for Tiximax services.
+
+### Tests
+
+- **`config/repository_test.go`** — typed accessors, generic `Get[T]`, deep merge, concurrent reader/writer mix.
+- **`config/manager_test.go`** — merge precedence, reload, OnChange, idempotent Shutdown, source-name uniqueness, nil-source rejection, ErrClosed semantics.
+- **`config/conformance_test.go`** — driver-agnostic Load / Name / idempotent Shutdown across `env`, `file`, `static`. New drivers shipped under `config/drivers/...` must keep this green to be considered config-compatible.
+- **`config/edges_test.go`** — nil-data Repository, empty keys, non-map intermediates overwritten by `Set`, AddSource rollback on Load error, concurrent `Reload`.
+- **`config/drivers/file/file_test.go`** — YAML / JSON / TOML round-trips, optional-vs-required missing path, format-extension mismatch, explicit `Format` override, idempotent Shutdown returning `ErrClosed`, mtime-based watch firing on change.
+- **`config/drivers/env/env_test.go`** — prefix filtering, `__` → `.` nesting, ErrClosed after Shutdown, registry auto-registration.
+
+### Roadmap reshuffle
+
+`docs/ARCHITECTURE.md` and `README.md` roadmap tables updated to announce the new Laravel-parity sequence: `events` → `hashing` → `encryption` → `pipeline` → `secrets` → `validation` → `httpclient` → `ratelimit` → `mail` → `notifications` → `scheduler` → `featureflag` → `resilience` first, then resume `queue` / `httpx` / `cloudwatch` / `health` toward the `v1.0` API freeze. No removal of previously promised modules — only an order change to ship the higher-leverage pieces first.
+
+### Dependencies
+
+- `gopkg.in/yaml.v3` (new, BSD-3) — file driver YAML decoding.
+- `github.com/BurntSushi/toml` (new, MIT) — file driver TOML decoding.
+
 ## [0.7.1] — 2026-05-25
 
 Test-hardening patch. No public-API changes other than one new sentinel error in `cache/driver`. The release is driven by a fresh "audit every nook and cranny" pass over the cache + storage modules.
