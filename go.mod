@@ -16,6 +16,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.7
 	github.com/aws/aws-sdk-go-v2/service/sesv2 v1.61.0
 	github.com/aws/smithy-go v1.25.1
+	github.com/go-chi/chi/v5 v5.2.1
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/robfig/cron/v3 v3.0.1
