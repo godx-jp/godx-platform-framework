@@ -3,7 +3,7 @@
 > **Opinionated Go SDK by godx** — modular, OpenTelemetry-native, backend-agnostic.
 > Write once, swap backends (godx-platform-observability ↔ AWS CloudWatch ↔ Datadog ↔ …) by changing one env var.
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](./LICENSE)
 [![Maintainer](https://img.shields.io/badge/by-godx-black.svg)](#)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](https://go.dev)
@@ -93,7 +93,10 @@ A **driver** is the in-process code that ships telemetry to a destination ("back
 | Stdout | `stdout` | ✅ Working | dev, containers (orchestrator collects stdout) |
 | File   | `file`   | ✅ Working | bare-metal / VM, zero-budget, Laravel-style local file (`none` / `daily` / `size` rotation, gzip, retention) |
 | OTLP   | `otlp`   | ✅ Working | godx-platform-observability, Datadog, New Relic, any OTLP receiver |
-| CloudWatch | `cloudwatch` | 🚧 Stub | full impl in 0.3.0 (AWS ADOT) |
+| Stack  | `stack`  | ✅ Working | fan-out: every log record to multiple sub-drivers (Laravel `stack` channel) |
+| CloudWatch | `cloudwatch` | 🚧 Stub | full impl in 0.4.0 (AWS ADOT) |
+
+Plus **named channels** (Laravel-style per-call selection — `obs.Channel("audit").Info(...)`): see [docs/OBSERVABILITY.md#channels](./docs/OBSERVABILITY.md#channels).
 
 Adding a new driver: see [docs/DRIVERS.md](./docs/DRIVERS.md).
 

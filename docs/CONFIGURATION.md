@@ -19,9 +19,17 @@ Naming rules:
 
 | Variable | Type | Default | Purpose |
 |----------|------|---------|---------|
-| `OBSERVABILITY_DRIVER` | enum | `stdout` | Driver selector: `stdout` · `file` · `otlp` · `cloudwatch` |
+| `OBSERVABILITY_DRIVER` | enum | `stdout` | Driver selector: `stdout` · `file` · `otlp` · `stack` · `cloudwatch` |
 | `OBSERVABILITY_LOG_LEVEL` | enum | `info` | `debug` · `info` · `warn` · `error` |
 | `OBSERVABILITY_TRACE_SAMPLE_RATE` | float | `1.0` | Sample rate in `[0..1]`; outside the range ⇒ always sample |
+
+## Observability — stack driver
+
+Required when `OBSERVABILITY_DRIVER=stack`. Every log record fans out to each named sub-driver in order. Each sub-driver inherits the rest of the env (so set `OBSERVABILITY_LOG_FILE_PATH` for a `file` sub-driver, `OTEL_EXPORTER_OTLP_ENDPOINT` for an `otlp` sub-driver, etc.).
+
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `OBSERVABILITY_STACK_DRIVERS` | comma list | _required_ | Sub-drivers in dispatch order, e.g. `stdout,file`. Whitespace tolerated. `stack` may not appear (no nesting). |
 
 ## Observability — file driver
 
@@ -46,7 +54,7 @@ Required when `OBSERVABILITY_DRIVER=otlp`. Names match the OpenTelemetry [enviro
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | enum | `grpc` | `grpc` or `http` (== `http/protobuf`) |
 | `OTEL_EXPORTER_OTLP_INSECURE` | bool | `true` | Skip TLS verification (dev only — set `false` for prod TLS endpoints) |
 
-## Observability — CloudWatch driver (0.3.0+)
+## Observability — CloudWatch driver (0.4.0+)
 
 These are already read by `LoadConfigFromEnv` so consumers can set them today; the driver itself returns an error until 0.3.0.
 
@@ -55,7 +63,7 @@ These are already read by `LoadConfigFromEnv` so consumers can set them today; t
 | `AWS_REGION` | string | _unset_ | AWS region for CloudWatch + X-Ray endpoints |
 | `OBSERVABILITY_CLOUDWATCH_LOG_GROUP` | string | _unset_ (driver derives from `service.name`) | Override CloudWatch log group name |
 
-Standard AWS credential resolution (env, IRSA, EC2 metadata, `~/.aws/credentials`) applies once the 0.3.0 driver lands.
+Standard AWS credential resolution (env, IRSA, EC2 metadata, `~/.aws/credentials`) applies once the 0.4.0 driver lands.
 
 ## HTTP middleware
 
@@ -63,7 +71,7 @@ Standard AWS credential resolution (env, IRSA, EC2 metadata, `~/.aws/credentials
 |----------|---------|---------|
 | `observability.CorrelationHeader` | `X-Correlation-ID` | Header read on requests / written on responses |
 
-Configurable correlation header name is planned for 0.3.0.
+Configurable correlation header name is planned for 0.4.0.
 
 ## Defaults summary
 
@@ -86,9 +94,12 @@ Example `.env.example` shipped with a service:
 ```bash
 DEPLOYMENT_ENVIRONMENT=dev
 
-OBSERVABILITY_DRIVER=stdout       # stdout | file | otlp | cloudwatch
+OBSERVABILITY_DRIVER=stdout       # stdout | file | otlp | stack | cloudwatch
 OBSERVABILITY_LOG_LEVEL=info
 OBSERVABILITY_TRACE_SAMPLE_RATE=1.0
+
+# Required when OBSERVABILITY_DRIVER=stack (and set the sub-drivers' own vars too)
+# OBSERVABILITY_STACK_DRIVERS=stdout,file
 
 # Required when OBSERVABILITY_DRIVER=file
 # OBSERVABILITY_LOG_FILE_PATH=./logs/app.log
@@ -103,7 +114,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_EXPORTER_OTLP_INSECURE=true
 
-# Required when OBSERVABILITY_DRIVER=cloudwatch (0.3.0+)
+# Required when OBSERVABILITY_DRIVER=cloudwatch (0.4.0+)
 # AWS_REGION=ap-northeast-1
 # OBSERVABILITY_CLOUDWATCH_LOG_GROUP=/service/my-app
 ```

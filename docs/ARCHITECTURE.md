@@ -83,13 +83,13 @@ app.Shutdown(ctx)
               └─────────┬──────────┘
                         │ Driver interface
                         ▼
-  ┌──────────┬───────────────┬────────────┬───────────────┐
-  │ stdout   │ file          │ otlp       │ cloudwatch    │
-  │ (dev,    │ (Laravel-     │ (LGTM,     │ (AWS, 0.3.0)  │
-  │  k8s)    │  style local) │  Datadog…) │               │
-  └──────────┴───────────────┴────────────┴───────────────┘
+  ┌──────────┬───────────────┬────────────┬───────────────┬──────────────┐
+  │ stdout   │ file          │ otlp       │ stack         │ cloudwatch   │
+  │ (dev,    │ (Laravel-     │ (LGTM,     │ (fan-out      │ (AWS, 0.4.0) │
+  │  k8s)    │  style local) │  Datadog…) │  to N drivers)│              │
+  └──────────┴───────────────┴────────────┴───────────────┴──────────────┘
 
-   selected by:  OBSERVABILITY_DRIVER=stdout|file|otlp|cloudwatch
+   selected by:  OBSERVABILITY_DRIVER=stdout|file|otlp|stack|cloudwatch
 ```
 
 The application **never** imports an exporter or a vendor SDK. Swapping the driver is a deployment configuration change, not a recompile.
@@ -111,8 +111,10 @@ The application **never** imports an exporter or a vendor SDK. Swapping the driv
 | Version | Modules added |
 |---------|---------------|
 | 0.1.x | initial scaffold (deprecated naming) |
-| 0.2.x | env-var rename to full `OBSERVABILITY_*`, `Backend` → `Driver` (this release) |
-| 0.3.x | `observability` cloudwatch driver (AWS ADOT), configurable correlation header, `httpx` (chi router + handlers) |
-| 0.4.x | `dbx` (sqlc + outbox), `cachex` |
-| 0.5.x | `queuex`, `eventbus` |
+| 0.2.x | env-var rename to full `OBSERVABILITY_*`, `Backend` → `Driver` |
+| 0.3.x | `stack` driver (Laravel fan-out), named channels (`obs.Channel("audit").Info(...)`) |
+| 0.4.x | `cloudwatch` driver (AWS ADOT), configurable correlation header |
+| 0.5.x | `httpx` (chi router + handlers) |
+| 0.6.x | `dbx` (sqlc + outbox), `cachex` |
+| 0.7.x | `queuex`, `eventbus` |
 | 1.0.0 | API freeze; semver guarantees for `1.x` |

@@ -22,14 +22,15 @@ The decision of *where telemetry goes* belongs to operators, not developers.
 
 Selecting a driver picks the backend implicitly: `OBSERVABILITY_DRIVER=otlp` + `OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317` ships telemetry to whichever backend that collector forwards to.
 
-## Available drivers (v0.2.x)
+## Available drivers (v0.3.x)
 
 | `OBSERVABILITY_DRIVER` | Status | What it does | Dependencies |
 |------------------------|--------|--------------|--------------|
 | `stdout` | ✅ stable | slog JSON to stdout, in-process tracer (always sample), no-op meter | none beyond OTel SDK |
 | `file` | ✅ stable | slog JSON to local file with Laravel-style rotation (`none` / `daily` / `size`), gzip, retention | `gopkg.in/natefinch/lumberjack.v2` |
 | `otlp` | ✅ stable | slog JSON to stdout + OTLP gRPC/HTTP for traces + metrics | OTel OTLP exporters |
-| `cloudwatch` | 🚧 stub | Returns `ErrCloudWatchNotImplemented` — full driver lands in 0.3.0 | (none yet) |
+| `stack` | ✅ stable | fan-out: every log record goes to N sub-drivers (Laravel `stack` channel) | inherits from sub-drivers |
+| `cloudwatch` | 🚧 stub | Returns `ErrCloudWatchNotImplemented` — full driver lands in 0.4.0 | (none yet) |
 
 ### `stdout`
 
@@ -94,9 +95,46 @@ Use for: any environment with an OTel-compatible receiver (godx-platform-observa
 
 Logs are written to stdout (JSON) and are expected to be picked up out-of-process (Promtail / Fluent Bit / OTel Collector filelog receiver). This matches the standard container-log workflow and avoids dragging a third exporter into the binary.
 
-### `cloudwatch` (stub in 0.2.x)
+### `stack`
 
-`NewProvider` returns `drivers.ErrCloudWatchNotImplemented`. The 0.3.0 release will use AWS ADOT exporters to push logs to CloudWatch Logs, metrics to CloudWatch Metrics, and traces to X-Ray. Tracked env vars (already accepted by `LoadConfigFromEnv`): `AWS_REGION`, `OBSERVABILITY_CLOUDWATCH_LOG_GROUP`.
+Use for: situations where you want every log record to land in more than one place at once — for example, stdout (so the Kubernetes orchestrator captures it) *and* a local file (so an on-call engineer can `tail -f` over SSH) *and* OTLP (so it ends up in Grafana / Datadog). Mirrors Laravel's `stack` log channel.
+
+The stack driver is a **meta-driver**: it instantiates each named sub-driver from the same Spec, dispatches every `slog.Record` to all of them, and joins their errors. Traces and metrics use the **first sub-driver only** — duplicating an OTel span across exporters would produce double-counted distributed traces.
+
+| Env var | Type | Default | Purpose |
+|---------|------|---------|---------|
+| `OBSERVABILITY_STACK_DRIVERS` | comma list | _required_ | Sub-drivers in dispatch order, e.g. `stdout,file`. Whitespace tolerated; `stack` may not appear (no nesting). |
+
+Plus whatever env vars the chosen sub-drivers require (e.g. `OBSERVABILITY_LOG_FILE_PATH` for `file`, `OTEL_EXPORTER_OTLP_ENDPOINT` for `otlp`).
+
+**Recipes**:
+
+```bash
+# Container + safety net — every log line ends up in both places
+OBSERVABILITY_DRIVER=stack
+OBSERVABILITY_STACK_DRIVERS=stdout,file
+OBSERVABILITY_LOG_FILE_PATH=/var/log/app/app.log
+
+# Self-hosted + audit copy on local disk
+OBSERVABILITY_DRIVER=stack
+OBSERVABILITY_STACK_DRIVERS=otlp,file
+OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+OBSERVABILITY_LOG_FILE_PATH=/var/log/app/app.log
+
+# Belt-and-braces: stdout for k8s + OTLP for Loki
+OBSERVABILITY_DRIVER=stack
+OBSERVABILITY_STACK_DRIVERS=stdout,otlp
+OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+```
+
+**Caveats**:
+- Stack is **not** the same as named channels. Use stack when you want the *same* record in multiple places. Use [channels](./OBSERVABILITY.md#channels) when you want *different* records in different places (e.g. audit logs to CloudWatch, app logs to stdout).
+- Nesting (`stack` inside `stack`) is rejected at construction.
+- A sub-driver that fails initialisation fails the whole stack — there is no partial start.
+
+### `cloudwatch` (stub in 0.3.x)
+
+`NewProvider` returns `drivers.ErrCloudWatchNotImplemented`. The 0.4.0 release will use AWS ADOT exporters to push logs to CloudWatch Logs, metrics to CloudWatch Metrics, and traces to X-Ray. Tracked env vars (already accepted by `LoadConfigFromEnv`): `AWS_REGION`, `OBSERVABILITY_CLOUDWATCH_LOG_GROUP`.
 
 ## Writing a custom driver
 

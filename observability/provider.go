@@ -20,6 +20,8 @@ type Provider struct {
 	logger *slog.Logger
 	tracer trace.Tracer
 	meter  metric.Meter
+
+	channels channelRegistry
 }
 
 // NewProvider constructs a provider for the given config. Most callers should
@@ -48,6 +50,7 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 		LogFileMaxAgeDays:  cfg.LogFileMaxAgeDays,
 		LogFileMaxBackups:  cfg.LogFileMaxBackups,
 		LogFileCompress:    cfg.LogFileCompress,
+		StackDrivers:       cfg.StackDrivers,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("observability: driver %q: %w", cfg.Driver, err)
@@ -78,9 +81,40 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 // Driver reports the active driver name (e.g. "otlp").
 func (p *Provider) Driver() string { return p.cfg.Driver }
 
-// Logger returns the contextual slog logger. Pre-decorated with service
-// identity; trace_id / correlation_id are injected on each Handle call.
+// Logger returns the contextual slog logger for the primary channel.
+// Pre-decorated with service identity; trace_id / correlation_id are
+// injected on each Handle call. Equivalent to Channel(PrimaryChannel).
 func (p *Provider) Logger() *slog.Logger { return p.logger }
+
+// Channel returns the slog logger for the given channel name (Laravel-style
+// `Log::channel('audit')->info(...)`). Pass "" or [PrimaryChannel] to get
+// the same logger as [Provider.Logger].
+//
+// If the channel has not been registered with [NewChannel], the primary
+// logger is returned and a warning is emitted — channels are best-effort by
+// design so calling code does not need to nil-check.
+func (p *Provider) Channel(name string) *slog.Logger {
+	if name == "" || name == PrimaryChannel {
+		return p.logger
+	}
+	if logger, ok := p.channels.get(name); ok {
+		return logger
+	}
+	p.logger.Warn("observability: unknown channel, falling back to primary",
+		"channel", name,
+		"available", p.channels.names(),
+	)
+	return p.logger
+}
+
+// Channels reports every registered channel name, including the primary.
+// Useful for diagnostics or admin endpoints.
+func (p *Provider) Channels() []string { return p.channels.names() }
+
+// registerChannel is the internal hook used by [NewChannel] modules.
+func (p *Provider) registerChannel(name string, logger *slog.Logger) {
+	p.channels.set(name, logger)
+}
 
 // Tracer returns the OTel tracer scoped to the service name.
 func (p *Provider) Tracer() trace.Tracer { return p.tracer }

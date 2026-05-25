@@ -57,6 +57,11 @@ type Spec struct {
 	LogFileMaxAgeDays  int    // delete rotated files older than N days (0 = keep forever)
 	LogFileMaxBackups  int    // keep at most N rotated files (0 = unlimited)
 	LogFileCompress    bool   // gzip rotated files
+
+	// Stack driver — list of sub-driver names that receive every log
+	// record. Each sub-driver is built from the same Spec (so file/OTLP
+	// settings flow through). Ignored by non-stack drivers.
+	StackDrivers []string
 }
 
 // New constructs the named driver.
@@ -70,6 +75,8 @@ func New(ctx context.Context, s Spec) (Driver, error) {
 		return newOTLP(ctx, s)
 	case "cloudwatch":
 		return newCloudWatch(ctx, s)
+	case "stack":
+		return newStack(ctx, s)
 	default:
 		return nil, fmt.Errorf("drivers: unknown driver %q", s.Name)
 	}

@@ -17,7 +17,8 @@ const (
 	DriverStdout     = "stdout"     // pretty JSON logs to stdout; dev / containers
 	DriverFile       = "file"       // local file with optional rotation; bare-metal / VM
 	DriverOTLP       = "otlp"       // OTLP gRPC/HTTP; godx-platform-observability, Datadog, New Relic, …
-	DriverCloudWatch = "cloudwatch" // AWS CloudWatch Logs/Metrics + X-Ray (stub in 0.2.x, full in 0.3.0)
+	DriverCloudWatch = "cloudwatch" // AWS CloudWatch Logs/Metrics + X-Ray (stub in 0.3.x, full in 0.4.0)
+	DriverStack      = "stack"      // fan-out: every log record goes to N sub-drivers (Laravel `stack` channel)
 )
 
 // Config controls observability bootstrap. The framework module loads it
@@ -61,6 +62,11 @@ type Config struct {
 	LogFileMaxAgeDays int    // delete rotated files older than N days; 0 = forever
 	LogFileMaxBackups int    // keep at most N rotated files; 0 = unlimited
 	LogFileCompress   bool   // gzip rotated files
+
+	// Stack-driver fields. Used when Driver == "stack" — fan-out every
+	// log record to each named sub-driver. Each sub-driver inherits the
+	// rest of this Config (so OTLP / file settings flow through).
+	StackDrivers []string
 }
 
 // LoadConfigFromEnv reads SDK configuration from environment variables.
@@ -82,6 +88,7 @@ type Config struct {
 //	OBSERVABILITY_LOG_FILE_MAX_AGE_DAYS   14
 //	OBSERVABILITY_LOG_FILE_MAX_BACKUPS    0
 //	OBSERVABILITY_LOG_FILE_COMPRESS       true
+//	OBSERVABILITY_STACK_DRIVERS           (empty, comma-separated)
 //
 // ServiceName / ServiceVersion are not populated by this function; the
 // framework module sets them from [framework.App].
@@ -102,6 +109,7 @@ func LoadConfigFromEnv() Config {
 		LogFileMaxAgeDays:  parseInt(getEnv("OBSERVABILITY_LOG_FILE_MAX_AGE_DAYS", "14"), 14),
 		LogFileMaxBackups:  parseInt(getEnv("OBSERVABILITY_LOG_FILE_MAX_BACKUPS", "0"), 0),
 		LogFileCompress:    parseBool(getEnv("OBSERVABILITY_LOG_FILE_COMPRESS", "true"), true),
+		StackDrivers:       parseCSV(os.Getenv("OBSERVABILITY_STACK_DRIVERS")),
 	}
 	return cfg
 }
@@ -113,15 +121,18 @@ func (c Config) Validate() error {
 		return fmt.Errorf("observability: ServiceName is required")
 	}
 	switch c.Driver {
-	case DriverStdout, DriverFile, DriverOTLP, DriverCloudWatch:
+	case DriverStdout, DriverFile, DriverOTLP, DriverCloudWatch, DriverStack:
 	default:
-		return fmt.Errorf("observability: unknown driver %q (valid: stdout, file, otlp, cloudwatch)", c.Driver)
+		return fmt.Errorf("observability: unknown driver %q (valid: stdout, file, otlp, cloudwatch, stack)", c.Driver)
 	}
 	if c.Driver == DriverOTLP && c.OTLPEndpoint == "" {
 		return fmt.Errorf("observability: OTLPEndpoint required when driver=otlp (set OTEL_EXPORTER_OTLP_ENDPOINT)")
 	}
 	if c.Driver == DriverFile && c.LogFilePath == "" {
 		return fmt.Errorf("observability: LogFilePath required when driver=file (set OBSERVABILITY_LOG_FILE_PATH)")
+	}
+	if c.Driver == DriverStack && len(c.StackDrivers) == 0 {
+		return fmt.Errorf("observability: StackDrivers required when driver=stack (set OBSERVABILITY_STACK_DRIVERS as a comma-separated list)")
 	}
 	return nil
 }
@@ -165,4 +176,18 @@ func parseBool(s string, def bool) bool {
 		return v
 	}
 	return def
+}
+
+func parseCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

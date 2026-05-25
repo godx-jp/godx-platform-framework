@@ -80,6 +80,50 @@ p   := observability.FromContext(ctx)                   // never nil
 cid := observability.CorrelationIDFromContext(ctx)
 ```
 
+## Channels
+
+Channels mirror Laravel's `Log::channel('name')->info(...)` API — multiple named loggers, each backed by its own driver, selected per call. The primary channel comes from environment variables; additional channels are registered in code via [`NewChannel`](../observability/channel.go).
+
+```go
+app := framework.New("svc", "1.0.0").
+    Use(observability.Module).                                    // primary channel from env
+    Use(observability.NewChannel("audit", observability.Config{   // local file
+        Driver:      observability.DriverFile,
+        LogFilePath: "/var/log/svc/audit.log",
+    })).
+    Use(observability.NewChannel("billing", observability.Config{ // separate OTLP collector
+        Driver:       observability.DriverOTLP,
+        OTLPEndpoint: "billing-collector:4317",
+    }))
+```
+
+Per-call selection inside a handler:
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    obs := observability.FromContext(r.Context())
+
+    obs.Logger().InfoContext(r.Context(), "normal app log")               // primary
+    obs.Channel("audit").InfoContext(r.Context(), "user X did Y")         // file
+    obs.Channel("billing").InfoContext(r.Context(), "payment", "amount", 100) // OTLP
+}
+```
+
+Rules:
+
+- `Channel("")` and `Channel("primary")` return the primary logger (== `Logger()`).
+- An unknown channel name returns the primary logger and emits one warn log line — calls never panic.
+- Order matters: `observability.Module` must be `Use`d before any `NewChannel` so the primary provider exists at wire-up time. The wrong order returns a startup error.
+- Channels are a **logging** concept. Traces and metrics always flow through the primary provider so distributed traces are not duplicated.
+
+When you simply want every record to fan out to several destinations (e.g. stdout + file at the same time), use the [`stack` driver](./DRIVERS.md#stack) instead. Channels and stack compose freely — your primary channel can itself be a `stack`, and an extra channel can also be a `stack`.
+
+Inspect registered channels:
+
+```go
+obs.Channels() // []string{"primary", "audit", "billing"}
+```
+
 ## Using outside the framework
 
 The `framework.Module` glue is a convenience; the SDK works standalone:
