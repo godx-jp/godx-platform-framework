@@ -305,7 +305,7 @@ here so the metric *shape* is designed to make them expressible.
 
 | Phase | Scope | PR / commit prefix |
 |-------|-------|--------------------|
-| **P1** | RED metrics + route-template span/labels + severity mapping in `observability.HTTP` | `feat(observability):` |
+| **P1** ✅ *implemented* | RED metrics + route-template span/labels + severity mapping in `observability.HTTP` | `feat(observability):` |
 | **P2** | `httpx.ErrorObserver` + observability bridge + `InstrumentedRouter` | `feat(httpx):` / `feat(observability):` |
 | **P3** | `ErrorReporter` sink + adapters for events/scheduler/outbox | `feat(observability):` |
 | **P4** | Circuit-breaker `OnStateChange` + notifications alerting bridge | `feat(resilience):` / `feat(observability):` |

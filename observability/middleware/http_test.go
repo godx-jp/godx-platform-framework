@@ -7,8 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/godx-jp/godx-platform-framework/observability"
 	"github.com/godx-jp/godx-platform-framework/observability/middleware"
@@ -117,4 +120,89 @@ func TestHTTP_GeneratesCorrelationWhenMissing(t *testing.T) {
 			t.Errorf("response CID header does not match downstream CID")
 		}
 	})
+}
+
+// TestHTTP_LogSeverityByStatus verifies the per-request log level reflects the
+// response status: 5xx→ERROR, 4xx→WARN, else INFO.
+func TestHTTP_LogSeverityByStatus(t *testing.T) {
+	cases := []struct {
+		status    int
+		wantLevel string
+	}{
+		{http.StatusOK, "INFO"},
+		{http.StatusNotFound, "WARN"},
+		{http.StatusInternalServerError, "ERROR"},
+	}
+	for _, tc := range cases {
+		out := captureStdout(t, func() {
+			p, err := observability.NewProvider(context.Background(), observability.Config{
+				ServiceName: "sev-svc",
+				Driver:      observability.DriverStdout,
+				LogLevel:    slog.LevelInfo,
+			})
+			if err != nil {
+				t.Fatalf("NewProvider: %v", err)
+			}
+			defer p.Shutdown(context.Background())
+
+			handler := middleware.HTTP(p)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil))
+		})
+		if want := `"level":"` + tc.wantLevel + `"`; !strings.Contains(out, want) {
+			t.Errorf("status %d: log missing %s\n%s", tc.status, want, out)
+		}
+	}
+}
+
+// TestHTTP_RouteTemplateInLog verifies the middleware records the low-cardinality
+// chi route template (not the concrete path) as http.route.
+func TestHTTP_RouteTemplateInLog(t *testing.T) {
+	out := captureStdout(t, func() {
+		p, err := observability.NewProvider(context.Background(), observability.Config{
+			ServiceName: "route-svc",
+			Driver:      observability.DriverStdout,
+			LogLevel:    slog.LevelInfo,
+		})
+		if err != nil {
+			t.Fatalf("NewProvider: %v", err)
+		}
+		defer p.Shutdown(context.Background())
+
+		r := chi.NewRouter()
+		r.Use(middleware.HTTP(p))
+		r.Get("/users/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/users/42", nil))
+	})
+	if !strings.Contains(out, `"http.route":"/users/{id}"`) {
+		t.Errorf("log missing route template\n%s", out)
+	}
+	if !strings.Contains(out, `"path":"/users/42"`) {
+		t.Errorf("log missing concrete path\n%s", out)
+	}
+}
+
+// TestHTTP_UnmatchedRoute verifies requests not served through a chi router fall
+// back to the constant route label, bounding cardinality.
+func TestHTTP_UnmatchedRoute(t *testing.T) {
+	out := captureStdout(t, func() {
+		p, err := observability.NewProvider(context.Background(), observability.Config{
+			ServiceName: "unmatched-svc",
+			Driver:      observability.DriverStdout,
+			LogLevel:    slog.LevelInfo,
+		})
+		if err != nil {
+			t.Fatalf("NewProvider: %v", err)
+		}
+		defer p.Shutdown(context.Background())
+
+		handler := middleware.HTTP(p)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/anything/123", nil))
+	})
+	if !strings.Contains(out, `"http.route":"<unmatched>"`) {
+		t.Errorf("log missing unmatched route fallback\n%s", out)
+	}
 }

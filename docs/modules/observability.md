@@ -203,9 +203,30 @@ For each request the middleware:
 
 1. **Extracts trace context** from the incoming W3C `traceparent` header (or starts a new root span).
 2. **Reads or generates correlation ID** (`X-Correlation-ID`), stores it on `r.Context()`, echoes it on the response.
-3. **Starts a server-kind span** named `METHOD /path`.
+3. **Starts a server-kind span** named `METHOD /route-template` (e.g. `GET /users/{id}`). The span name and `http.route` use the matched **route template**, never the concrete path, to bound trace/metric cardinality. On a 5xx the span gets `SetStatus(codes.Error)`, an `error.type` attribute, and a recorded error.
 4. **Captures status code** via a wrapping `ResponseWriter`.
-5. **Logs `http_request`** with `method`, `path`, `status`, `duration_ms`, `remote`.
+5. **Records RED metrics** (see below).
+6. **Logs `http_request`** with `method`, `path`, `http.route`, `status`, `duration_ms`, `remote`, `trace_id` — at a severity derived from the status: **5xx → ERROR, 4xx → WARN, else INFO** (RFC 7231 §6), so operators can filter and alert on server errors by log level.
+
+> **Route template requires a router that populates it.** The template is read from chi's `RouteContext`. Mount `middleware.HTTP` on a `chi.Mux` (`r.Use(middleware.HTTP(obs))`) to get real templates; requests not served through chi (or unmatched) fall back to `http.route="<unmatched>"`.
+
+### RED metrics
+
+The middleware registers and records the OpenTelemetry [HTTP server metrics](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/) on `obs.Meter()`:
+
+| Instrument | Type | Attributes |
+|---|---|---|
+| `http.server.request.duration` (unit `s`) | histogram | `http.request.method`, `http.response.status_code`, `http.route`, `url.scheme`, `error.type` (5xx only) |
+| `http.server.active_requests` | up-down counter | `http.request.method`, `url.scheme` |
+
+**Error rate is derived** from the duration histogram's count filtered by `http.response.status_code` / `error.type` — the OTel-idiomatic approach — so there is no separate error counter to double-count. With the `otlp` driver these export to your collector; with `stdout`/`file`/`cloudwatch` the meter is a no-op and recording costs nothing. Build the same instrument set yourself via `observability.NewHTTPMetrics(obs.Meter())` if you need them outside the middleware.
+
+Example alert (OTel → Prometheus): 5xx ratio over 5 minutes —
+
+```promql
+sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
+  / sum(rate(http_server_request_duration_seconds_count[5m]))
+```
 
 Downstream handlers retrieve the provider via:
 
