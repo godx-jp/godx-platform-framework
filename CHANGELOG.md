@@ -4,6 +4,22 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.8.4] — 2026-05-25
+
+Ships the `pipeline/` module — Laravel's `Pipeline` facade reimagined for Go with generics. Fifth release in the Laravel-parity reshuffle.
+
+### Added
+
+- **`pipeline/` module** — generic `Pipeline[T]` builder with `Through(stages...)`, `Then(final)`, and `ThenReturn()`. Compiled `Pipe[T]` closure runs stages in append order; each stage receives `(ctx, T, next)` and may short-circuit by returning an error or pass control via `next(ctx, value)`.
+- **`Stage[T] = func(ctx, T, next) (T, error)`** — closure shape matching Laravel's `fn ($x, $next) { … }`. `FuncStage(fn)` helper wraps side-effect-only closures that always delegate.
+- **`pipeline.Chain(final, stages...)`** — net/http compatibility helper. Composes `HTTPStage = func(next http.Handler) http.Handler` right-to-left so the first argument runs outermost (matches chi/echo/gin `Use(...)` conventions).
+- **`examples/pipeline/main.go`** — demonstrates typed Order pipeline with coupon + VAT stages and an interleaved trace stage.
+- **`docs/modules/pipeline.md`** — full reference + Laravel mapping + Migrating from go-common.
+
+### Tests
+
+- **`pipeline/pipeline_test.go`** — empty pipeline returns identity, stages run in append order with correct pre/post unwinding, short-circuit skips siblings + final, nil stages skipped, nil final uses passthrough, context cancellation respected by stages, `FuncStage` runs and delegates, `Stages()` counts skip nils, concurrent `Pipe` invocations safe (no shared mutable state in the compiled closure), `Chain` HTTP middleware order matches chi.
+
 ## [0.8.3] — 2026-05-25
 
 Ships the `encryption/` module — authenticated symmetric encryption with versioned key rotation. Fourth release in the Laravel-parity reshuffle.
