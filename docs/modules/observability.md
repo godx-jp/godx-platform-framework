@@ -237,6 +237,76 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+## Error reporting & alerting
+
+The RED metrics above cover the HTTP request/response path. For **non-HTTP** error sources — background workers, schedulers, the outbox relay, the events bus, a circuit breaker tripping — the `ErrorReporter` is the central sink. A single `Report` call fans out to three places:
+
+1. **Log** — written via `obs.Logger()` at the report's severity (zero value ⇒ `Error`), carrying `source`, `error.type` (the Go error's concrete type, e.g. `*fmt.wrapError`), the error message, and any caller `Attrs`. Because it logs context-aware, `trace_id` / `correlation_id` are attached automatically.
+2. **Metric** — increments an `Int64Counter` `errors.reported` (unit `{error}`) on `obs.Meter()`, keyed by `source` and `error.type`. This is a deliberate convenience counter for non-HTTP sources; HTTP error rate still comes from the `http.server.request.duration` histogram above. With `stdout`/`file`/`cloudwatch` (no-op meter) the increment costs nothing.
+3. **Notify (optional)** — when a `Notifier` is configured and the severity meets the threshold, dispatch a **rate-limited** alert (see below). Alerting is off until you wire a notifier, so there is no surprise egress.
+
+```go
+type ErrorReport struct {
+    Err      error       // the error that occurred
+    Source   string      // "http" | "scheduler" | "queue" | "events" | "outbox" | "circuitbreaker" | ...
+    Severity slog.Level  // zero value => slog.LevelError
+    Attrs    []slog.Attr // structured context (job, subject, route, ...)
+}
+
+type ErrorReporter interface {
+    Report(ctx context.Context, r ErrorReport)
+}
+
+rep := observability.NewReporter(obs, observability.ReporterOptions{ /* alerting opts */ })
+rep.Report(ctx, observability.ErrorReport{Err: err, Source: "queue", Severity: slog.LevelError})
+```
+
+`NewReporter` accepts a `*Provider` (a nil provider falls back to the package global). The returned reporter is **safe for concurrent use**.
+
+### Rate-limited alerting
+
+To turn an error into an early-warning alert, give the reporter a `Notifier`:
+
+```go
+type Notifier interface {
+    Notify(ctx context.Context, subject, body string) error
+}
+```
+
+This minimal sink keeps `observability` decoupled from the `notifications` module — adapt `notifications` to it with a small shim (`Notify` formats a `Notifiable` + `Notification` and calls `notifications.Manager.Send`). A `nil` notifier disables alerting.
+
+```go
+rep := observability.NewReporter(obs, observability.ReporterOptions{
+    Notifier:       myNotifier,        // nil => no alerts
+    NotifyMinLevel: slog.LevelError,   // zero => Error: only >= this severity alerts
+    NotifyRate:     rate.Every(time.Minute), // golang.org/x/time/rate; zero => ~1/min
+    NotifyBurst:    1,                 // token-bucket burst; zero => 1
+})
+```
+
+Notifications are throttled by a **token-bucket limiter keyed per `source`+`error.type`**, so an error storm of one kind cannot drown out a different, rarer error — each key has its own bucket. A notification dropped by the limiter never blocks or errors the `Report` call, and a notifier that returns an error is logged at `Warn` and swallowed (alerting must never break the reporting path).
+
+The env knobs in [CONFIGURATION](../CONFIGURATION.md) (`OBSERVABILITY_ERROR_NOTIFY_*`) map onto these options.
+
+### Adapter helpers
+
+Existing per-module hooks are wired to a reporter through three closures. They match each hook's signature exactly so `observability` never imports `httpx`, `events`, `scheduler`, or `messaging/outbox`:
+
+| Helper | Wires into | Behaviour |
+|--------|-----------|-----------|
+| `HTTPErrorObserver(rep)` → `func(ctx, err, status)` | `httpx.SetErrorObserver` | severity from status: ≥500 → Error, ≥400 → Warn, else Info; skips `nil` err |
+| `ErrorHook(rep, source)` → `func(error)` | `events` async `OnError`, `outbox` `OnError` | skips `nil`; uses default (Error) severity |
+| `JobErrorHook(rep, source)` → `func(job, err)` | `scheduler` `OnRun` | no-op when `err == nil`; attaches the job name as an attribute |
+
+```go
+rep := observability.NewReporter(obs, observability.ReporterOptions{Notifier: myNotifier})
+
+httpx.SetErrorObserver(observability.HTTPErrorObserver(rep))
+events.NewAsync(bus, events.AsyncOptions{OnError: observability.ErrorHook(rep, "events")})
+outbox.Poll(ctx, store, pub, outbox.Options{OnError: observability.ErrorHook(rep, "outbox")})
+scheduler.New(scheduler.Options{OnRun: observability.JobErrorHook(rep, "scheduler")})
+```
+
 ## Context API
 
 ```go
