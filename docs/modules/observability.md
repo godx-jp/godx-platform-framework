@@ -119,6 +119,7 @@ OBSERVABILITY_LOG_FILE_PATH=./logs/app.log
 Caveats:
 - In containers, prefer `stdout`. The `file` driver inside a container couples log retention to the container lifecycle unless you mount a persistent volume.
 - File rotation is in-process. If you also rotate externally via `logrotate(8)`, configure it with `copytruncate`.
+- Log files are written with restricted permissions (`0640`, in a `0750` directory) so they are not world-readable on shared hosts.
 
 ### otlp (opt-in)
 

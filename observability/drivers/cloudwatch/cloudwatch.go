@@ -122,20 +122,26 @@ type logsAPI interface {
 }
 
 // cwHandler batches JSON log lines to CloudWatch Logs.
+//
+// mu is held by POINTER so that the clones returned by WithAttrs/WithGroup
+// share the same lock and the buffer state it guards, rather than copying the
+// mutex (which go vet flags and which would corrupt the shared batch). All
+// clones funnel their writes through the original handler's lineBuffer, so
+// they must coordinate on one mutex.
 type cwHandler struct {
 	client logsAPI
 	group  string
 	stream string
 	level  slog.Level
 
-	mu           sync.Mutex
-	events       []cwltypes.InputLogEvent
-	seq          *string
-	closed       bool
-	flushEvery   time.Duration
-	maxBatch     int
-	lastFlush    time.Time
-	inner        slog.Handler
+	mu         *sync.Mutex
+	events     []cwltypes.InputLogEvent
+	seq        *string
+	closed     bool
+	flushEvery time.Duration
+	maxBatch   int
+	lastFlush  time.Time
+	inner      slog.Handler
 }
 
 func newCWHandler(client logsAPI, group, stream string, level slog.Level) *cwHandler {
@@ -144,6 +150,7 @@ func newCWHandler(client logsAPI, group, stream string, level slog.Level) *cwHan
 		group:      group,
 		stream:     stream,
 		level:      level,
+		mu:         &sync.Mutex{},
 		flushEvery: 2 * time.Second,
 		maxBatch:   100,
 		lastFlush:  time.Now(),
@@ -165,18 +172,29 @@ func (h *cwHandler) Enabled(_ context.Context, level slog.Level) bool {
 	return level >= h.level
 }
 
+// lock returns the shared mutex, lazily allocating one if the handler was
+// constructed as a bare struct literal (e.g. in tests) rather than via
+// newCWHandler. Real handlers always have mu set before any concurrent use,
+// so this lazy path runs single-threaded.
+func (h *cwHandler) lock() *sync.Mutex {
+	if h.mu == nil {
+		h.mu = &sync.Mutex{}
+	}
+	return h.mu
+}
+
 func (h *cwHandler) Handle(ctx context.Context, r slog.Record) error {
 	return h.inner.Handle(ctx, r)
 }
 
 func (h *cwHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	clone := *h
+	clone := *h // batch is a pointer, so the shared mutex/buffer is shared, not copied
 	clone.inner = h.inner.WithAttrs(attrs)
 	return &clone
 }
 
 func (h *cwHandler) WithGroup(name string) slog.Handler {
-	clone := *h
+	clone := *h // batch is a pointer, so the shared mutex/buffer is shared, not copied
 	clone.inner = h.inner.WithGroup(name)
 	return &clone
 }
@@ -184,8 +202,9 @@ func (h *cwHandler) WithGroup(name string) slog.Handler {
 func (h *cwHandler) appendLine(line []byte) {
 	line = append([]byte(nil), line...)
 	ts := time.Now().UnixMilli()
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.lock()
+	mu.Lock()
+	defer mu.Unlock()
 	if h.closed {
 		return
 	}
@@ -199,8 +218,9 @@ func (h *cwHandler) appendLine(line []byte) {
 }
 
 func (h *cwHandler) Flush(ctx context.Context) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	mu := h.lock()
+	mu.Lock()
+	defer mu.Unlock()
 	return h.flushLocked(ctx)
 }
 

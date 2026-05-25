@@ -32,6 +32,11 @@ import (
 // Name is the identifier used by OBSERVABILITY_DRIVER to select this driver.
 const Name = "file"
 
+// logFileMode is the least-privilege permission for log files: owner
+// read/write, group read, no access for others. Logs may contain request
+// metadata or tokens, so they must not be world-readable.
+const logFileMode os.FileMode = 0o640
+
 // Rotation modes accepted via OBSERVABILITY_LOG_FILE_ROTATION.
 const (
 	RotationNone  = "none"  // append-only, no rotation
@@ -53,7 +58,7 @@ func New(_ context.Context, s driver.Spec) (driver.Driver, error) {
 	if err != nil {
 		return nil, fmt.Errorf("file driver: resolve path %q: %w", s.LogFilePath, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
 		return nil, fmt.Errorf("file driver: create log dir: %w", err)
 	}
 
@@ -70,9 +75,15 @@ func New(_ context.Context, s driver.Spec) (driver.Driver, error) {
 	)
 	switch rotation {
 	case RotationNone:
-		f, err := os.OpenFile(abs, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(abs, os.O_APPEND|os.O_CREATE|os.O_WRONLY, logFileMode)
 		if err != nil {
 			return nil, fmt.Errorf("file driver: open %s: %w", abs, err)
+		}
+		// O_CREATE honours the requested mode only for a brand-new file and is
+		// further masked by umask; chmod guarantees least-privilege regardless.
+		if err := os.Chmod(abs, logFileMode); err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("file driver: chmod %s: %w", abs, err)
 		}
 		w = f
 		closeFn = f.Close
@@ -85,6 +96,15 @@ func New(_ context.Context, s driver.Spec) (driver.Driver, error) {
 			MaxBackups: s.LogFileMaxBackups,
 			Compress:   s.LogFileCompress,
 			LocalTime:  true,
+		}
+		// lumberjack v2 has no file-mode option and creates files 0644. Force
+		// the active log file open now so we can constrain its mode; rotated
+		// backups are renamed from this file and inherit the same perms.
+		if _, err := lj.Write(nil); err != nil {
+			return nil, fmt.Errorf("file driver: init %s: %w", abs, err)
+		}
+		if err := os.Chmod(abs, logFileMode); err != nil {
+			return nil, fmt.Errorf("file driver: chmod %s: %w", abs, err)
 		}
 		w = lj
 		closeFn = lj.Close
