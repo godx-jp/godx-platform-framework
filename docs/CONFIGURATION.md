@@ -261,6 +261,36 @@ Heavy drivers (`vault`, `gcpsm`, `awssm`) require a blank import. See [modules/s
 | `HTTPCLIENT_MAX_RETRIES` | int | `3` | Resilient driver max retries |
 | `HTTPCLIENT_RETRY_BACKOFF` | duration | `100ms` | Resilient driver base backoff |
 
+## Rate limit
+
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `RATELIMIT_DEFAULT` | string | `memory` | Default limiter name |
+| `RATELIMIT_LIMITERS` | csv | default only | Named limiters to register |
+| `RATELIMIT_RATE` | float | `10` | Sustained refill rate (tokens per second) |
+| `RATELIMIT_BURST` | int | `20` | Maximum bucket capacity |
+| `RATELIMIT_PREFIX` | string | _empty_ | Redis key prefix (redis driver) |
+
+Per-limiter overrides use `RATELIMIT_LIMITER_<NAME>_*`. When `<NAME>` matches a known driver name (`memory`, `redis`) and `DRIVER` is unset, the driver is inferred from the name.
+
+| Variable | Type | Default | Driver | Purpose |
+|----------|------|---------|--------|---------|
+| `RATELIMIT_LIMITER_<NAME>_DRIVER` | enum | inferred from name | all | `memory` · `redis` |
+| `RATELIMIT_LIMITER_<NAME>_RATE` | float | global `RATELIMIT_RATE` | all | Per-limiter refill rate |
+| `RATELIMIT_LIMITER_<NAME>_BURST` | int | global `RATELIMIT_BURST` | all | Per-limiter burst |
+| `RATELIMIT_LIMITER_<NAME>_PREFIX` | string | global prefix | redis | Key prefix |
+| `RATELIMIT_LIMITER_<NAME>_URL` | string | _unset_ | redis | Full URL — `redis://[user:pass@]host:port[/db]` |
+| `RATELIMIT_LIMITER_<NAME>_ADDRESS` | string | _unset_ | redis | `host:port` when URL is empty |
+| `RATELIMIT_LIMITER_<NAME>_USERNAME` | string | _unset_ | redis | ACL username |
+| `RATELIMIT_LIMITER_<NAME>_PASSWORD` | string | _unset_ | redis | Password |
+| `RATELIMIT_LIMITER_<NAME>_DB` | int | `0` | redis | Logical database index |
+
+The redis driver carries the `go-redis/v9` SDK and is registered only when the consumer blank-imports it. Light drivers (`memory`) auto-register.
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/ratelimit/drivers/redis"
+```
+
 ## HTTP middleware
 
 | Constant | Default | Purpose |

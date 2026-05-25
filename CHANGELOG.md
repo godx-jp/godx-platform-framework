@@ -4,6 +4,29 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-05-25
+
+Ships the `ratelimit/` module — token-bucket rate limiting with memory and Redis drivers plus HTTP middleware (v0.9.2 wave).
+
+### Added
+
+- **`ratelimit/` module** — Manager + Allow/Reset facade over named limiters.
+- **Drivers:** `memory` (sync.Map token buckets, auto), `redis` (Lua token bucket via go-redis, blank import).
+- **`ratelimit/middleware`** — HTTP middleware with `ByIP` / `ByHeader` key funcs; returns 429 + Retry-After.
+- **`examples/ratelimit/main.go`**, **`docs/modules/ratelimit.md`**.
+
+### Tests
+
+- **`ratelimit/driver/registry_test.go`** — Register / Lookup / Names / New; blank-import hint.
+- **`ratelimit/conformance_test.go`** — burst, deny, reset, key isolation, shutdown for memory driver.
+- **`ratelimit/middleware/http_test.go`** — httptest 429 + Retry-After, ByHeader isolation.
+- **`ratelimit/module_test.go`** — App wiring, env defaults, duplicate init, context helpers.
+
+### Changed
+
+- `docs/ARCHITECTURE.md` repository layout lists `ratelimit/` tree.
+- `README.md` Modules table shows ratelimit as stable (v0.9.2).
+
 ## [0.14.0] — 2026-05-25
 
 Ships the `health/` module — Kubernetes-style liveness and readiness probes.
@@ -115,29 +138,6 @@ Ships the `httpx/` module — chi router helpers and middleware stack.
 ### Observability
 
 - **`observability/drivers/cloudwatch`** — CloudWatch Logs driver (batched JSON via `aws-sdk-go-v2/service/cloudwatchlogs`); replaces prior stub.
-
-## [0.9.2] — 2026-05-25
-
-Ships the `ratelimit/` module — token-bucket rate limiting with memory and Redis drivers plus HTTP middleware.
-
-### Added
-
-- **`ratelimit/` module** — Manager + Allow/Reset facade over named limiters.
-- **Drivers:** `memory` (sync.Map token buckets, auto), `redis` (Lua token bucket via go-redis, blank import).
-- **`ratelimit/middleware`** — HTTP middleware with `ByIP` / `ByHeader` key funcs; returns 429 + Retry-After.
-- **`examples/ratelimit/main.go`**, **`docs/modules/ratelimit.md`**.
-
-### Tests
-
-- **`ratelimit/driver/registry_test.go`** — Register / Lookup / Names / New; blank-import hint.
-- **`ratelimit/conformance_test.go`** — burst, deny, reset, key isolation, shutdown for memory driver.
-- **`ratelimit/middleware/http_test.go`** — httptest 429 + Retry-After, ByHeader isolation.
-- **`ratelimit/module_test.go`** — App wiring, env defaults, duplicate init, context helpers.
-
-### Changed
-
-- `docs/ARCHITECTURE.md` repository layout lists `ratelimit/` tree.
-- `README.md` Modules table shows ratelimit as stable (v0.9.2).
 
 ## [0.9.1] — 2026-05-25
 
