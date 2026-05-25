@@ -12,10 +12,10 @@
 // Compatibility profiles (see Profile):
 //
 //   - ProfileAWS:   virtual-hosted-style addressing, region required,
-//                   endpoint optional (defaults to AWS regional URL).
+//     endpoint optional (defaults to AWS regional URL).
 //   - ProfileMinIO: path-style addressing forced, endpoint required,
-//                   region defaults to "us-east-1" when unset
-//                   (MinIO uses it for signing only).
+//     region defaults to "us-east-1" when unset
+//     (MinIO uses it for signing only).
 //
 // The Profile only affects defaults; every Spec field is still
 // overridable so consumers running MinIO behind a custom domain (or
@@ -381,13 +381,28 @@ func (d *impl) URL(key string) (string, error) {
 	return d.publicURL + "/" + strings.Join(parts, "/"), nil
 }
 
+// maxSignedURLTTL caps how long a signed URL may stay valid. 7 days
+// matches S3 SigV4's own hard limit; a leaked URL therefore cannot grant
+// access beyond a week even if a caller (or misconfig) requests longer.
+const maxSignedURLTTL = 7 * 24 * time.Hour
+
+// clampTTL floors a non-positive expiry to a 15-minute default and caps an
+// over-long one to maxSignedURLTTL. It never errors — it clamps and proceeds.
+func clampTTL(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 15 * time.Minute
+	}
+	if d > maxSignedURLTTL {
+		return maxSignedURLTTL
+	}
+	return d
+}
+
 func (d *impl) SignedURL(ctx context.Context, key string, expires time.Duration) (string, error) {
 	if d.presigner == nil {
 		return "", fmt.Errorf("%w: presigner not configured", stordriver.ErrNotSupported)
 	}
-	if expires <= 0 {
-		expires = 15 * time.Minute
-	}
+	expires = clampTTL(expires)
 	k, err := cleanKey(key)
 	if err != nil {
 		return "", err

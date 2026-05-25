@@ -337,6 +337,8 @@ default:                                        // success
 
 The `local` driver rejects keys containing `..` segments **before** path cleaning to defeat the `Clean("/../x") == "/x"` foot-gun. Absolute keys and Windows-style backslashes are normalised; empty keys are rejected.
 
+Signed-URL expiry is clamped to a 7-day maximum (matching S3 SigV4's own limit) across the `s3`, `minio`, `gcs` and `azure` drivers, so a leaked URL cannot grant access beyond a week even if a caller requests a longer TTL; a non-positive TTL still floors to a 15-minute default.
+
 Beyond that lexical check, every filesystem operation is confined to the disk root via Go's `os.Root` (`os.OpenRoot`): open, create, stat, read-dir and remove all go through the rooted handle, which refuses `..` traversal and **does not follow symlinks out of the root**. So even a symlink planted inside the root by another process or an extracted archive cannot be used to read, overwrite or delete a target outside the root — the operation fails atomically at the OS level rather than touching the linked file. File modes are still enforced explicitly (0600 private / 0644 public) with a follow-up `Chmod`, since `os.Root` creation is subject to umask.
 
 ## Reference
