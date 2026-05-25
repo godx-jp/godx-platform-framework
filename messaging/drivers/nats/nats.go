@@ -8,6 +8,7 @@ package nats
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -21,8 +22,8 @@ func init() {
 }
 
 type broker struct {
-	nc   *natsgo.Conn
-	js   natsgo.JetStreamContext
+	nc     *natsgo.Conn
+	js     natsgo.JetStreamContext
 	prefix string
 
 	mu     sync.Mutex
@@ -34,7 +35,16 @@ func New(ctx context.Context, spec mdriver.Spec) (mdriver.Broker, error) {
 	if spec.NATSURL == "" {
 		return nil, fmt.Errorf("messaging/nats: NATSURL required")
 	}
-	nc, err := natsgo.Connect(spec.NATSURL, natsgo.Name("godx-messaging"))
+	nc, err := natsgo.Connect(spec.NATSURL,
+		natsgo.Name("godx-messaging"),
+		natsgo.MaxReconnects(-1),
+		natsgo.ReconnectWait(natsgo.DefaultReconnectWait),
+		natsgo.DisconnectErrHandler(func(_ *natsgo.Conn, err error) {
+			if err != nil {
+				// logged by NATS client; broker stays alive for reconnect
+			}
+		}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("messaging/nats: connect: %w", err)
 	}
@@ -43,13 +53,9 @@ func New(ctx context.Context, spec mdriver.Spec) (mdriver.Broker, error) {
 		nc.Close()
 		return nil, fmt.Errorf("messaging/nats: jetstream: %w", err)
 	}
-	prefix := spec.SubjectPrefix
-	if prefix == "" {
-		prefix = "godx."
-	}
-	b := &broker{nc: nc, js: js, prefix: prefix}
+	b := &broker{nc: nc, js: js, prefix: spec.SubjectPrefix}
 	if spec.StreamName != "" {
-		if err := b.ensureStream(ctx, spec.StreamName); err != nil {
+		if err := b.ensureStream(ctx, spec.StreamName, spec); err != nil {
 			_ = b.Close(ctx)
 			return nil, err
 		}
@@ -57,16 +63,24 @@ func New(ctx context.Context, spec mdriver.Spec) (mdriver.Broker, error) {
 	return b, nil
 }
 
-func (b *broker) ensureStream(_ context.Context, name string) error {
-	subjects := []string{b.prefix + ">"}
+func streamSubjects(prefix string) []string {
+	if prefix == "" {
+		return []string{">"}
+	}
+	return []string{prefix + ">"}
+}
+
+func (b *broker) ensureStream(_ context.Context, name string, spec mdriver.Spec) error {
+	replicas := extraInt(spec.Extra, "stream_replicas", 1)
 	_, err := b.js.StreamInfo(name)
 	if err == nil {
 		return nil
 	}
 	_, err = b.js.AddStream(&natsgo.StreamConfig{
 		Name:     name,
-		Subjects: subjects,
+		Subjects: streamSubjects(b.prefix),
 		Storage:  natsgo.FileStorage,
+		Replicas: replicas,
 	})
 	if err != nil && !strings.Contains(err.Error(), "stream name already in use") {
 		return fmt.Errorf("messaging/nats: add stream: %w", err)
@@ -74,9 +88,34 @@ func (b *broker) ensureStream(_ context.Context, name string) error {
 	return nil
 }
 
+func extraInt(extra map[string]string, key string, def int) int {
+	if extra == nil {
+		return def
+	}
+	v := strings.TrimSpace(extra[key])
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return def
+	}
+	return n
+}
+
+func durableName(subject, override string) string {
+	if override != "" {
+		return override
+	}
+	return "godx_" + strings.NewReplacer(".", "_", "*", "all", ">", "all").Replace(subject)
+}
+
 func (b *broker) Name() string { return mdriver.DriverNATS }
 
 func (b *broker) subject(name string) string {
+	if b.prefix == "" {
+		return name
+	}
 	if strings.HasPrefix(name, b.prefix) {
 		return name
 	}
@@ -102,7 +141,7 @@ func (b *broker) Publish(_ context.Context, subject string, msg mdriver.Message)
 	return nil
 }
 
-func (b *broker) Subscribe(_ context.Context, subject string, handler mdriver.Handler) (mdriver.Subscription, error) {
+func (b *broker) Subscribe(ctx context.Context, subject string, handler mdriver.Handler) (mdriver.Subscription, error) {
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
@@ -110,17 +149,27 @@ func (b *broker) Subscribe(_ context.Context, subject string, handler mdriver.Ha
 	}
 	b.mu.Unlock()
 	subject = b.subject(subject)
+	durable := durableName(subject, "")
 	sub, err := b.js.Subscribe(subject, func(m *natsgo.Msg) {
+		if ctx.Err() != nil {
+			_ = m.Nak()
+			return
+		}
 		headers := map[string]string{}
 		for k := range m.Header {
 			headers[k] = m.Header.Get(k)
 		}
-		_ = handler(context.Background(), mdriver.Message{
+		err := handler(ctx, mdriver.Message{
 			Subject: m.Subject,
 			Body:    append([]byte(nil), m.Data...),
 			Headers: headers,
 		})
-	})
+		if err != nil {
+			_ = m.Nak()
+			return
+		}
+		_ = m.Ack()
+	}, natsgo.ManualAck(), natsgo.Durable(durable))
 	if err != nil {
 		return nil, err
 	}

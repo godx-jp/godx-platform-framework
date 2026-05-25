@@ -4,6 +4,25 @@
 > Dispatch fans every event out to every matching listener. Wrap the
 > Bus in NewAsync for fire-and-forget worker-pool semantics.
 
+## Three-layer decision tree
+
+The framework ships three separate modules for asynchronous work. Use this table to pick the right layer — they are **not** interchangeable.
+
+| Use case | Use | Do not |
+|----------|-----|--------|
+| Side-effects inside the same service (audit, internal email trigger) | `events.Bus` — `Listen` / `Dispatch` | Publish directly to a broker |
+| Background work with retry, backoff, and DLQ; no CloudEvents contract | `queue` + durable driver (e.g. Redis) | Fire-and-forget `go func()` without persistence |
+| Service ↔ service integration with a CloudEvents contract | `messaging` + **transactional outbox** | `Publish()` from an HTTP handler |
+| Domain event must reach another service | `events` + **`WireBridge`** (`integration.*` prefix) → outbox / messaging | Forward every domain event to the broker |
+
+| Layer | Module | Scope | Laravel parallel |
+|-------|--------|-------|------------------|
+| 1 — Domain | `events` | In-process listeners in one service | `Event::listen` + `dispatch` |
+| 2 — Integration | `messaging` | Cross-service pub/sub (CloudEvents) | Broker package + outbox |
+| 3 — Jobs | `queue` | Durable workers, retry, DLQ | `Queue::push` / `queue:work` |
+
+Layer 1 is intentionally in-memory. Process crash loses in-flight async jobs — that is by design. Move durable or cross-service work to `queue` or `messaging`. See [`messaging.md`](messaging.md) and [`queue.md`](queue.md).
+
 ## Concepts
 
 A single `Bus` owns all subscriptions. Subscribers register by pattern; the dispatcher walks every subscription on every `Dispatch` and invokes matching listeners synchronously by default. The async wrapper turns Dispatch into a queue-and-return operation handled by a background worker pool — Laravel's `ShouldQueue` is the spiritual cousin.

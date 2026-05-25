@@ -101,7 +101,9 @@ app := framework.New(...).Use(messaging.ModuleWithConfig(cfg))
 
 ## CloudEvents envelope
 
-`messaging/envelope` is the wire format — CloudEvents `specversion` `1.0`.
+`messaging/envelope` is the wire format — CloudEvents **v1.0.2** (wire `specversion` `"1.0"`).
+
+Constants: `envelope.SpecVersion` (`"1.0"`), `envelope.SpecVersionDoc` (`"1.0.2"`). Decode rejects unsupported `specversion` values.
 
 ```go
 type Event struct {
@@ -147,22 +149,36 @@ type Store interface {
     MarkPublished(ctx context.Context, ids []string) error
 }
 
+type RetryStore interface {
+    Store
+    MarkFailed(ctx context.Context, id string, errMsg string) error
+}
+
 type Row struct {
-    ID        string
-    EventType string
-    Payload   []byte
-    CreatedAt time.Time
+    ID         string
+    EventID    string    // CloudEvents id (defaults to ID)
+    EventType  string
+    Subject    string    // NATS subject (defaults to EventType)
+    Payload    []byte
+    RetryCount int
+    CreatedAt  time.Time
 }
 ```
 
-`RunRelay(ctx, store Store, pub *messaging.Publisher, opts RelayOptions) error` fetches one batch (`RelayOptions.BatchSize`, default `100`), publishes each row as a CloudEvent (`ID` = row ID, `Type` = `EventType`, `Source` = `opts.Source`, `Data` = `Payload`), then marks the published IDs. It is a single pass — the application schedules it on a ticker / worker loop. A nil `store` or `pub` is a no-op.
+| Function | Notes |
+|---|---|
+| `RunRelay(ctx, store, pub, opts)` | Single batch; partial success — failed rows stay unpublished |
+| `RunPoller(ctx, store, pub, opts)` | Background loop (`PollerOptions.Interval`, default 2s); calls `RunRelay` each tick |
+| `RelayOptions.MaxRetries` | When set and `store` implements `RetryStore`, rows at or above the limit are `MarkFailed` |
+
+Production NATS settings: leave `MESSAGING_CONN_*_SUBJECT_PREFIX` empty for full TBK subject names; set `JETSTREAM_STREAM`; optional `Spec.Extra["stream_replicas"]` for HA clusters. The NATS driver uses manual Ack/Nak, durable consumers, and infinite reconnect.
 
 ## Driver matrix
 
 | Driver | Status | Registration | Notes |
 |---|---|---|---|
 | `memory` | stable | auto | In-process broker. Light. Ideal for tests and single-process services |
-| `nats` | stable | opt-in (`_ "...messaging/drivers/nats"`) | NATS / JetStream. Heavy |
+| `nats` | stable | opt-in (`_ "...messaging/drivers/nats"`) | NATS / JetStream — manual Ack/Nak, durable consumers, reconnect. Integration test: `go test -tags=integration ./messaging/drivers/nats/...` with `NATS_URL` |
 | `kafka` | stub | opt-in (`_ "...messaging/drivers/kafka"`) | Registered but its constructor returns `driver.ErrNotImplemented` — not usable yet |
 
 The `memory` driver auto-registers on `import "...messaging"`. Heavy drivers register only on an explicit blank import:

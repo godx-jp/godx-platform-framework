@@ -6,7 +6,12 @@ import (
 	"time"
 )
 
+// SpecVersion is the wire-format specversion for CloudEvents v1.0.2
+// (CNCF cloudevents/spec — JSON binding uses "1.0").
 const SpecVersion = "1.0"
+
+// SpecVersionDoc references the pinned CloudEvents specification release.
+const SpecVersionDoc = "1.0.2"
 
 type Event struct {
 	ID              string
@@ -70,6 +75,9 @@ func Decode(b []byte) (Event, error) {
 	e.Type = unquote("type")
 	e.Subject = unquote("subject")
 	e.DataContentType = unquote("datacontenttype")
+	if sv := unquote("specversion"); sv != "" && sv != SpecVersion {
+		return Event{}, fmt.Errorf("cloudevents: unsupported specversion %q (expected %q)", sv, SpecVersion)
+	}
 	if t := unquote("time"); t != "" {
 		parsed, err := time.Parse(time.RFC3339Nano, t)
 		if err == nil {

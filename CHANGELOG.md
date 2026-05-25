@@ -2,6 +2,22 @@
 
 All notable changes are documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · versioning: [SemVer](https://semver.org/).
 
+## [1.8.0] — 2026-05-25
+
+Production-ready EDA release: outbox poller, NATS JetStream hardening, CloudEvents conformance pin.
+
+### Added
+
+- **messaging/outbox** — `RunPoller`, `RetryStore`, `MarkFailed` after `MaxRetries`; per-row partial batch relay.
+- **messaging/envelope** — `SpecVersionDoc` pin to CloudEvents v1.0.2; decode rejects unsupported `specversion`; conformance tests for required attributes.
+- **messaging/drivers/nats** — infinite reconnect, manual Ack/Nak, durable JetStream consumers, empty `SubjectPrefix` for full TBK subjects, `stream_replicas` via `Spec.Extra`.
+- **messaging/drivers/nats** — integration test (`//go:build integration`, `NATS_URL`).
+
+### Changed
+
+- **messaging/outbox/Row** — optional `EventID`, `Subject`, `RetryCount` for relay mapping.
+- **docs/modules/messaging.md** — outbox poller, NATS production settings, CloudEvents 1.0.2 pin.
+
 ## [1.7.0] — 2026-05-26
 
 Middleware stack release: symmetric JWT auth, HTTP cross-cutting helpers, ratelimit ergonomics.

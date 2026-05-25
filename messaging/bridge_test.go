@@ -12,7 +12,7 @@ import (
 	memdrv "github.com/godx-jp/godx-platform-framework/messaging/drivers/memory"
 )
 
-func TestWireBridgePublishesMatchingEvents(t *testing.T) {
+func TestWireBridge(t *testing.T) {
 	broker, err := memdrv.New(context.Background(), mdriver.Spec{})
 	if err != nil {
 		t.Fatal(err)
