@@ -4,6 +4,23 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-05-25
+
+Ships the `health/` module — Kubernetes-style liveness and readiness probes.
+
+### Added
+
+- **`health/` module** — `RegisterProbe`, `/healthz`, `/readyz`, `Handler` and `Mount` helpers.
+- **`examples/health/main.go`**, **`docs/modules/health.md`**.
+
+### Tests
+
+- **`health/handler_test.go`** — liveness, readiness pass/fail, module wiring, probe overwrite.
+
+### Changed
+
+- `README.md` Modules table shows health as stable (v0.14.0).
+
 ## [0.13.2] — 2026-05-25
 
 Ships the `resilience/` module — shared retry, circuit-breaker, timeout, and bulkhead primitives.
@@ -80,6 +97,24 @@ Ships the `queue/` module — Laravel-style job queues with memory driver and he
 ### Changed
 
 - `README.md` Modules table shows queue as stable (v0.11.0).
+
+## [0.12.0] — 2026-05-25
+
+Ships the `httpx/` module — chi router helpers and middleware stack.
+
+### Added
+
+- **`httpx/`** — `NewRouter`, `Route`, `HandlerFunc` error handling, JSON helpers.
+- **`httpx/middleware`** — Pipeline, ValidateJSON, RateLimit wrappers.
+- **`examples/httpx/main.go`**, **`docs/modules/httpx.md`**.
+
+### Dependencies
+
+- `github.com/go-chi/chi/v5`
+
+### Observability
+
+- **`observability/drivers/cloudwatch`** — CloudWatch Logs driver (batched JSON via `aws-sdk-go-v2/service/cloudwatchlogs`); replaces prior stub.
 
 ## [0.9.2] — 2026-05-25
 
