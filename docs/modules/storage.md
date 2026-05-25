@@ -335,7 +335,9 @@ default:                                        // success
 
 ## Security: path traversal
 
-The `local` driver rejects keys containing `..` segments **before** path cleaning to defeat the `Clean("/../x") == "/x"` foot-gun. Combined with a sanity check that the resulting absolute path remains under the disk root, this matches the defence-in-depth posture of league/flysystem. Absolute keys and Windows-style backslashes are normalised; empty keys are rejected.
+The `local` driver rejects keys containing `..` segments **before** path cleaning to defeat the `Clean("/../x") == "/x"` foot-gun. Absolute keys and Windows-style backslashes are normalised; empty keys are rejected.
+
+Beyond that lexical check, every filesystem operation is confined to the disk root via Go's `os.Root` (`os.OpenRoot`): open, create, stat, read-dir and remove all go through the rooted handle, which refuses `..` traversal and **does not follow symlinks out of the root**. So even a symlink planted inside the root by another process or an extracted archive cannot be used to read, overwrite or delete a target outside the root — the operation fails atomically at the OS level rather than touching the linked file. File modes are still enforced explicitly (0600 private / 0644 public) with a follow-up `Chmod`, since `os.Root` creation is subject to umask.
 
 ## Reference
 

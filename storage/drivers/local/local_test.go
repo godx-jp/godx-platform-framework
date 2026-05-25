@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -82,6 +83,57 @@ func TestLocal_PathTraversalRejected(t *testing.T) {
 				t.Fatalf("expected error for key %q, got nil", key)
 			}
 		})
+	}
+}
+
+// TestLocal_SymlinkEscapeRefused plants a symlink inside the root that
+// points at a file outside the root and asserts that reads, writes and
+// deletes through that symlink are refused by os.Root rather than
+// touching the out-of-root target.
+func TestLocal_SymlinkEscapeRefused(t *testing.T) {
+	outside := t.TempDir()
+	root := t.TempDir()
+
+	// Secret living outside the storage root.
+	secretPath := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secretPath, []byte("top-secret"), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+
+	// Plant a symlink inside the root pointing at the out-of-root secret,
+	// simulating an extracted archive or a hostile co-process.
+	linkInRoot := filepath.Join(root, "evil.txt")
+	if err := os.Symlink(secretPath, linkInRoot); err != nil {
+		t.Skipf("symlinks unsupported on this platform: %v", err)
+	}
+
+	d := newDriver(t, root)
+	ctx := context.Background()
+
+	// Read through the symlink must be refused (no secret leakage).
+	if r, err := d.NewReader(ctx, "evil.txt"); err == nil {
+		_ = r.Close()
+		t.Fatalf("NewReader followed symlink out of root; expected refusal")
+	}
+
+	// Delete through the symlink must be refused and must NOT remove the
+	// out-of-root target.
+	_ = d.Delete(ctx, "evil.txt")
+	if _, err := os.Stat(secretPath); err != nil {
+		t.Fatalf("out-of-root secret was deleted via symlink: %v", err)
+	}
+
+	// Write through the symlink must not clobber the out-of-root target.
+	if w, err := d.NewWriter(ctx, "evil.txt", stordriver.WriteOptions{}); err == nil {
+		_, _ = w.Write([]byte("overwritten"))
+		_ = w.Close()
+	}
+	got, err := os.ReadFile(secretPath)
+	if err != nil {
+		t.Fatalf("read secret after write attempt: %v", err)
+	}
+	if string(got) != "top-secret" {
+		t.Fatalf("out-of-root secret was overwritten via symlink: %q", got)
 	}
 }
 

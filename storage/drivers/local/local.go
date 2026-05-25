@@ -55,8 +55,8 @@ func construct(_ context.Context, s driver.Spec) (driver.Driver, error) {
 		return nil, fmt.Errorf("local: create root %q: %w", root, err)
 	}
 	return &impl{
-		root:         root,
-		defaultVis:   defaultVisibility(s.DefaultVisibility),
+		root:          root,
+		defaultVis:    defaultVisibility(s.DefaultVisibility),
 		publicURLBase: strings.TrimRight(s.PublicURL, "/"),
 	}, nil
 }
@@ -97,12 +97,13 @@ func dirMode(v driver.Visibility) os.FileMode {
 	return privateDirMode
 }
 
-// safePath joins key onto the driver root and verifies the resulting
-// absolute path is still under the root. Defeats absolute-path inputs
-// and `../` traversal — `..` segments are rejected outright rather
-// than silently normalised away by path.Clean, matching the
-// defence-in-depth posture of league/flysystem.
-func (d *impl) safePath(key string) (string, error) {
+// relKey validates key and returns a slash-relative path suitable for
+// use with *os.Root (which is rooted at d.root). It rejects absolute-path
+// inputs and `..` traversal lexically as a first line of defence; the
+// authoritative protection against symlink/`..` escape is os.Root, which
+// refuses any operation that would resolve outside the root at the OS
+// level (see the rooted* helpers below).
+func (d *impl) relKey(key string) (string, error) {
 	if strings.TrimSpace(key) == "" {
 		return "", fmt.Errorf("local: empty key")
 	}
@@ -116,31 +117,95 @@ func (d *impl) safePath(key string) (string, error) {
 	if cleaned == "/" {
 		return "", fmt.Errorf("local: empty key after clean")
 	}
-	abs := filepath.Join(d.root, filepath.FromSlash(cleaned))
-	rel, err := filepath.Rel(d.root, abs)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("local: path %q escapes root", key)
+	// Drop the leading slash so the result is relative to the root.
+	rel := strings.TrimPrefix(cleaned, "/")
+	return filepath.FromSlash(rel), nil
+}
+
+// openRoot opens an *os.Root anchored at the driver root for a single
+// operation. os.Root refuses any path that traverses out of the root via
+// symlinks or `..`, atomically and at the OS level, which the previous
+// purely-lexical safePath could not do. Opening per-op (rather than
+// caching one *os.Root) avoids fd-lifecycle bugs and keeps Shutdown
+// trivial; the cost is one openat per call, which is negligible for a
+// local-disk driver.
+func (d *impl) openRoot() (*os.Root, error) {
+	root, err := os.OpenRoot(d.root)
+	if err != nil {
+		return nil, fmt.Errorf("local: open root %q: %w", d.root, err)
 	}
-	return abs, nil
+	return root, nil
+}
+
+// rootedMkdirAll mirrors os.MkdirAll for the directory components of a
+// rel path, but every step goes through *os.Root so no component may be
+// a symlink escaping the root. dir is the slash/OS-relative directory.
+func rootedMkdirAll(root *os.Root, dir string, mode os.FileMode) error {
+	dir = filepath.Clean(dir)
+	if dir == "." || dir == string(filepath.Separator) {
+		return nil
+	}
+	// Build the list of ancestors from shallowest to deepest.
+	var parts []string
+	for p := dir; ; {
+		parts = append([]string{p}, parts...)
+		parent := filepath.Dir(p)
+		if parent == p {
+			break
+		}
+		p = parent
+	}
+	for _, p := range parts {
+		if p == "." || p == string(filepath.Separator) {
+			continue
+		}
+		if err := root.Mkdir(p, mode); err != nil && !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// rootFile pairs an open file with the *os.Root it was opened through so
+// closing the file also releases the root for per-op usage.
+type rootFile struct {
+	*os.File
+	root *os.Root
+}
+
+func (rf *rootFile) Close() error {
+	ferr := rf.File.Close()
+	rerr := rf.root.Close()
+	if ferr != nil {
+		return ferr
+	}
+	return rerr
 }
 
 func (d *impl) NewReader(_ context.Context, key string) (io.ReadCloser, error) {
-	p, err := d.safePath(key)
+	rel, err := d.relKey(key)
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(p)
+	root, err := d.openRoot()
+	if err != nil {
+		return nil, err
+	}
+	// os.Root.Open refuses symlink/`..` traversal out of the root.
+	f, err := root.Open(rel)
 	if errors.Is(err, fs.ErrNotExist) {
+		_ = root.Close()
 		return nil, fmt.Errorf("%w: %s", driver.ErrNotFound, key)
 	}
 	if err != nil {
+		_ = root.Close()
 		return nil, fmt.Errorf("local: open %q: %w", key, err)
 	}
-	return f, nil
+	return &rootFile{File: f, root: root}, nil
 }
 
 func (d *impl) NewWriter(_ context.Context, key string, opts driver.WriteOptions) (io.WriteCloser, error) {
-	p, err := d.safePath(key)
+	rel, err := d.relKey(key)
 	if err != nil {
 		return nil, err
 	}
@@ -148,22 +213,46 @@ func (d *impl) NewWriter(_ context.Context, key string, opts driver.WriteOptions
 	if !vis.IsValid() {
 		vis = d.defaultVis
 	}
-	if err := os.MkdirAll(filepath.Dir(p), dirMode(vis)); err != nil {
-		return nil, fmt.Errorf("local: mkdir for %q: %w", key, err)
-	}
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileMode(vis))
+	root, err := d.openRoot()
 	if err != nil {
+		return nil, err
+	}
+	if dir := filepath.Dir(rel); dir != "." {
+		if err := rootedMkdirAll(root, dir, dirMode(vis)); err != nil {
+			_ = root.Close()
+			return nil, fmt.Errorf("local: mkdir for %q: %w", key, err)
+		}
+	}
+	// os.Root.OpenFile refuses symlink/`..` traversal out of the root.
+	f, err := root.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileMode(vis))
+	if err != nil {
+		_ = root.Close()
 		return nil, fmt.Errorf("local: open writer %q: %w", key, err)
 	}
-	return f, nil
+	// os.Root.OpenFile applies the requested perms only on creation and is
+	// still subject to umask; Chmod afterwards guarantees the documented
+	// 0600 (private) / 0644 (public) modes regardless of umask.
+	if err := f.Chmod(fileMode(vis)); err != nil {
+		_ = f.Close()
+		_ = root.Close()
+		return nil, fmt.Errorf("local: chmod %q: %w", key, err)
+	}
+	return &rootFile{File: f, root: root}, nil
 }
 
 func (d *impl) Delete(_ context.Context, key string) error {
-	p, err := d.safePath(key)
+	rel, err := d.relKey(key)
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(p); err != nil {
+	root, err := d.openRoot()
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	// os.Root.Remove refuses symlink/`..` traversal out of the root and
+	// will not follow a symlink to delete its target.
+	if err := root.Remove(rel); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("%w: %s", driver.ErrNotFound, key)
 		}
@@ -173,11 +262,16 @@ func (d *impl) Delete(_ context.Context, key string) error {
 }
 
 func (d *impl) Exists(_ context.Context, key string) (bool, error) {
-	p, err := d.safePath(key)
+	rel, err := d.relKey(key)
 	if err != nil {
 		return false, err
 	}
-	info, err := os.Stat(p)
+	root, err := d.openRoot()
+	if err != nil {
+		return false, err
+	}
+	defer root.Close()
+	info, err := root.Stat(rel)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
@@ -189,11 +283,16 @@ func (d *impl) Exists(_ context.Context, key string) (bool, error) {
 }
 
 func (d *impl) Attributes(_ context.Context, key string) (driver.Attributes, error) {
-	p, err := d.safePath(key)
+	rel, err := d.relKey(key)
 	if err != nil {
 		return driver.Attributes{}, err
 	}
-	info, err := os.Stat(p)
+	root, err := d.openRoot()
+	if err != nil {
+		return driver.Attributes{}, err
+	}
+	defer root.Close()
+	info, err := root.Stat(rel)
 	if errors.Is(err, fs.ErrNotExist) {
 		return driver.Attributes{}, fmt.Errorf("%w: %s", driver.ErrNotFound, key)
 	}
@@ -216,16 +315,21 @@ func visibilityFromMode(mode os.FileMode) driver.Visibility {
 }
 
 func (d *impl) List(_ context.Context, prefix string) ([]driver.Entry, error) {
-	dir, err := d.safePath(prefix)
-	if err != nil {
-		// Allow listing the root via empty/"/" prefix.
-		if strings.TrimSpace(prefix) == "" || prefix == "/" {
-			dir = d.root
-		} else {
+	// relDir is "." for the root, otherwise the rooted relative directory.
+	relDir := "."
+	if strings.TrimSpace(prefix) != "" && prefix != "/" {
+		r, err := d.relKey(prefix)
+		if err != nil {
 			return nil, err
 		}
+		relDir = r
 	}
-	info, err := os.Stat(dir)
+	root, err := d.openRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	info, err := root.Stat(relDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -235,14 +339,24 @@ func (d *impl) List(_ context.Context, prefix string) ([]driver.Entry, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("local: %q is not a directory", prefix)
 	}
-	entries, err := os.ReadDir(dir)
+	// os.Root has no ReadDir; open the directory through the root (which
+	// refuses traversal out of root) and read its entries from the *os.File.
+	df, err := root.Open(relDir)
+	if err != nil {
+		return nil, fmt.Errorf("local: open dir %q: %w", prefix, err)
+	}
+	entries, err := df.ReadDir(-1)
+	_ = df.Close()
 	if err != nil {
 		return nil, fmt.Errorf("local: read dir %q: %w", prefix, err)
 	}
+	base := relDir
+	if base == "." {
+		base = ""
+	}
 	out := make([]driver.Entry, 0, len(entries))
 	for _, e := range entries {
-		rel, _ := filepath.Rel(d.root, filepath.Join(dir, e.Name()))
-		key := filepath.ToSlash(rel)
+		key := filepath.ToSlash(filepath.Join(base, e.Name()))
 		entry := driver.Entry{Key: key, IsDir: e.IsDir()}
 		if !e.IsDir() {
 			if fi, ierr := e.Info(); ierr == nil {
