@@ -249,6 +249,18 @@ Full reference: [modules/config](./modules/config.md).
 
 Heavy drivers (`vault`, `gcpsm`, `awssm`) require a blank import. See [modules/secrets](./modules/secrets.md).
 
+## HTTP client
+
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `HTTPCLIENT_DEFAULT` | string | `stdlib` | Default client name |
+| `HTTPCLIENT_CLIENTS` | csv | default only | Named clients to register |
+| `HTTPCLIENT_BASE_URL` | url | _empty_ | Base URL for relative paths |
+| `HTTPCLIENT_TIMEOUT` | duration | `30s` | Request timeout |
+| `HTTPCLIENT_OTEL_SERVICE` | string | `httpclient` | OTel tracer service name |
+| `HTTPCLIENT_MAX_RETRIES` | int | `3` | Resilient driver max retries |
+| `HTTPCLIENT_RETRY_BACKOFF` | duration | `100ms` | Resilient driver base backoff |
+
 ## HTTP middleware
 
 | Constant | Default | Purpose |

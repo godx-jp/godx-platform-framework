@@ -4,6 +4,17 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-05-25
+
+Ships the `httpclient/` module — swappable HTTP client drivers with OTel client spans.
+
+### Added
+
+- **`httpclient/` module** — Manager + Client facade with Get/Post/PostJSON helpers.
+- **Drivers:** `stdlib` (OTel-instrumented net/http), `mock` (test recorder), `resilient` (retry + backoff + circuit breaker).
+- **`httpclient/middleware`** — OTel RoundTripper wrapper.
+- **`examples/httpclient/main.go`**, **`docs/modules/httpclient.md`**.
+
 ## [0.9.0] — 2026-05-25
 
 Ships the `validation/` module — Laravel-style struct validation with a struct-tag DSL, pluggable rule registry, and i18n message templates. First release in the v0.9.x validation + HTTP client + rate limit wave.
