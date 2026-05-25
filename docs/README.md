@@ -33,7 +33,8 @@ Index for the godx-platform-framework documentation.
 | `mail` | stable (v0.10.0) | [modules/mail](./modules/mail.md) |
 | `notifications` | stable (v0.10.1) | [modules/notifications](./modules/notifications.md) |
 | `scheduler` | stable (v0.13.0) | [modules/scheduler](./modules/scheduler.md) |
-| `featureflag`, `resilience` | roadmap (v0.13.x) | — |
+| `featureflag` | stable (v0.13.1) | [modules/featureflag](./modules/featureflag.md) |
+| `resilience` | roadmap (v0.13.x) | — |
 | `queue` | stable (v0.11.0) | [modules/queue](./modules/queue.md) |
 | `httpx` | roadmap (v0.12) | — |
 | `health` | roadmap (v0.14) | — |
