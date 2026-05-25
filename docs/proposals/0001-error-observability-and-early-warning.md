@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Draft / Proposed |
+| **Status** | Accepted — implemented in `v1.9.0` (P1–P4 landed; see Phase table) |
 | **Target version** | `v1.9.0` (additive, backwards-compatible minor) |
 | **Created** | 2026-05-26 |
 | **Supersedes** | — |
@@ -300,16 +300,33 @@ here so the metric *shape* is designed to make them expressible.
   accidental data exfil through notification payloads — consistent with the v1.8 SSRF guard).
 - **Hot-path cost:** one histogram record + one up-down counter add per request; instruments
   are created once at startup, not per request. Negligible vs handler cost.
+- **Backpressure / non-blocking (a sink must never stall the app):** logging and alerting run
+  on request goroutines, so a stalled sink (full disk, blocked stdout pipe, slow Slack/webhook)
+  could otherwise cause head-of-line blocking and cascading failure. Mitigations, per the
+  industry standard ("logging must never block the application" — Logback `AsyncAppender`
+  `neverBlock`, Log4j2 `AsyncLogger`, Zap `BufferedWriteSyncer`):
+  1. **Traces & metrics** are already exported asynchronously by the OTel SDK (batch span
+     processor, periodic metric reader) with their own bounded queues that drop on overflow.
+  2. **Alert notifications** (`ErrorReporter`) are dispatched on a background worker via a
+     **bounded queue with a non-blocking enqueue**: `Report` never blocks, drops on a full
+     queue (counted via `NotificationsDropped()`), and bounds each `Notify` with its own
+     timeout (never the request's cancelled context).
+  3. **Logging** offers an opt-in `NonBlockingHandler` (`OBSERVABILITY_LOG_ASYNC`): a bounded
+     in-memory queue drained by a worker that **drops + counts** on overflow rather than
+     blocking the caller. Default stays synchronous (deterministic for dev/tests); enable in
+     production where a stalled log sink is unacceptable.
+  The contract throughout: under sink stall the framework **sheds telemetry, not traffic** —
+  losses are counted and observable, never silent.
 
 ## 13. Phased rollout
 
 | Phase | Scope | PR / commit prefix |
 |-------|-------|--------------------|
 | **P1** ✅ *implemented* | RED metrics + route-template span/labels + severity mapping in `observability.HTTP` | `feat(observability):` |
-| **P2** | `httpx.ErrorObserver` + observability bridge + `InstrumentedRouter` | `feat(httpx):` / `feat(observability):` |
-| **P3** | `ErrorReporter` sink + adapters for events/scheduler/outbox | `feat(observability):` |
-| **P4** | Circuit-breaker `OnStateChange` + notifications alerting bridge | `feat(resilience):` / `feat(observability):` |
-| **P5** | Docs: `docs/modules/observability.md`, `httpx.md`, `OBSERVABILITY.md` guide + this RFC → `Accepted` | `docs:` |
+| **P2** ✅ *implemented* | `httpx.ErrorObserver` + observability bridge + `InstrumentedRouter` | `feat(httpx):` / `feat(observability):` |
+| **P3** ✅ *implemented* | `ErrorReporter` sink + adapters for events/scheduler/outbox (notifier dispatch is async + bounded — never blocks the caller) | `feat(observability):` |
+| **P4** ✅ *implemented* | Circuit-breaker `OnStateChange` + observable-by-default httpclient breaker | `feat(resilience):` |
+| **P5** ✅ *implemented* | Docs: `docs/modules/observability.md`, `httpx.md`, `resilience.md`, `OBSERVABILITY.md` guide + this RFC → `Accepted` | `docs:` |
 
 Each phase is independently shippable and backwards-compatible. P1 alone closes the most
 critical gap (no metrics → no alerting).
