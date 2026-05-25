@@ -6,6 +6,12 @@ import (
 	"net/http"
 )
 
+// DefaultMaxBodyBytes is the default request-body cap applied by
+// [DecodeJSON]. Bodies larger than this are rejected before they are
+// buffered, which protects against memory-exhaustion DoS from
+// unbounded JSON payloads. Override per-call with [DecodeJSONLimit].
+const DefaultMaxBodyBytes int64 = 1 << 20 // 1 MiB
+
 // HandlerFunc is the preferred handler signature — return nil on success
 // or an error to let the framework write an appropriate response.
 type HandlerFunc func(w http.ResponseWriter, r *http.Request) error
@@ -74,14 +80,34 @@ func NoContent(w http.ResponseWriter, status int) {
 	w.WriteHeader(status)
 }
 
-// DecodeJSON decodes the request body into dst. Returns 400 on failure.
+// DecodeJSON decodes the request body into dst using the default body-size
+// cap ([DefaultMaxBodyBytes]). Returns 400 on a malformed body and 413 when
+// the body exceeds the limit.
 func DecodeJSON(r *http.Request, dst any) error {
+	return DecodeJSONLimit(r, dst, DefaultMaxBodyBytes)
+}
+
+// DecodeJSONLimit decodes the request body into dst, rejecting bodies larger
+// than limit bytes. Pass a non-positive limit to use [DefaultMaxBodyBytes].
+//
+// Unknown fields are rejected. A malformed body returns a 400 StatusError; a
+// body that exceeds the limit returns a 413 StatusError so handlers do not
+// surface it as a 500.
+func DecodeJSONLimit(r *http.Request, dst any, limit int64) error {
 	if r.Body == nil {
 		return NewStatusError(http.StatusBadRequest, "empty body")
 	}
+	if limit <= 0 {
+		limit = DefaultMaxBodyBytes
+	}
+	r.Body = http.MaxBytesReader(nil, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			return WrapStatus(http.StatusRequestEntityTooLarge, "request body too large", err)
+		}
 		return WrapStatus(http.StatusBadRequest, "invalid json", err)
 	}
 	return nil
