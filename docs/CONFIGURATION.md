@@ -6,7 +6,7 @@ All configuration is via environment variables (12-factor). The SDK ships with s
 
 Naming rules:
 
-- Variables that control this SDK are namespaced `OBSERVABILITY_*` — no abbreviations.
+- Variables that control this SDK are namespaced by module: `OBSERVABILITY_*`, `STORAGE_*`, etc. — no abbreviations.
 - Variables that are industry standards (OpenTelemetry, AWS) keep their canonical name so external tooling can read them too.
 
 ## Core
@@ -104,13 +104,13 @@ Required when `OBSERVABILITY_DRIVER=otlp`. Names match the OpenTelemetry [enviro
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | enum | `grpc` | `grpc` or `http` (== `http/protobuf`) |
 | `OTEL_EXPORTER_OTLP_INSECURE` | bool | `true` | Skip TLS verification (dev only — set `false` for prod TLS endpoints) |
 
-### cloudwatch (stub in 0.4.x, full in 0.5.0)
+### cloudwatch (stub through v0.6.x, full in v0.7.0)
 
 ```go
 import _ "github.com/godx-jp/godx-platform-framework/observability/drivers/cloudwatch"
 ```
 
-Tracked env vars are already accepted by `LoadConfigFromEnv` so consumers can set them today; the driver itself returns `cloudwatch.ErrNotImplemented` until 0.5.0.
+Tracked env vars are already accepted by `LoadConfigFromEnv` so consumers can set them today; the driver itself returns `cloudwatch.ErrNotImplemented` until v0.7.0.
 
 | Variable | Type | Default | Purpose |
 |----------|------|---------|---------|
@@ -118,6 +118,43 @@ Tracked env vars are already accepted by `LoadConfigFromEnv` so consumers can se
 | `OBSERVABILITY_CLOUDWATCH_LOG_GROUP` | string | _unset_ (driver derives from `service.name`) | Override CloudWatch log group name |
 
 Standard AWS credential resolution (env, IRSA, EC2 metadata, `~/.aws/credentials`) applies once the 0.5.0 driver lands.
+
+## Storage — common
+
+The storage module loads zero or more named disks from the environment. With nothing set, you get a single `local` disk rooted at `./storage` with private visibility — matching Laravel's out-of-the-box `local` disk.
+
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `STORAGE_DEFAULT_DISK` | string | `local` | Name returned by `Manager.Default()` / `mgr.DefaultName()` |
+| `STORAGE_DISKS` | comma list | `<value of STORAGE_DEFAULT_DISK>` | Disks to register; each name must have at least the per-disk `DRIVER` env var set when not `local` |
+
+## Storage — per-disk env vars
+
+For each disk `<NAME>` listed in `STORAGE_DISKS`, the module reads env vars prefixed `STORAGE_DISK_<NAME>_`. Disk-name normalisation matches observability channels: case-insensitive; hyphens and spaces convert to underscores (`avatars-public` ⇒ `STORAGE_DISK_AVATARS_PUBLIC_*`).
+
+| Variable | Type | Default | Driver scope | Purpose |
+|----------|------|---------|--------------|---------|
+| `STORAGE_DISK_<NAME>_DRIVER` | enum | `local` | all | `local` · `memory` · `s3` · `gcs` · `azure` · `minio` |
+| `STORAGE_DISK_<NAME>_ROOT` | string | `./storage` (for `local`) | local | Filesystem root path |
+| `STORAGE_DISK_<NAME>_VISIBILITY` | enum | `private` | local + cloud | Default visibility for writes — `public` or `private` |
+| `STORAGE_DISK_<NAME>_PUBLIC_URL` | string | _unset_ | local + cloud | Base URL for `disk.URL(key)` — e.g. `https://cdn.example.com` |
+| `STORAGE_DISK_<NAME>_BUCKET` | string | _required for cloud_ | s3 · gcs · azure · minio | Bucket / container name |
+| `STORAGE_DISK_<NAME>_REGION` | string | _unset_ | s3 · minio | Cloud region — e.g. `ap-northeast-1` |
+| `STORAGE_DISK_<NAME>_ENDPOINT` | string | _unset_ (AWS default for s3) | s3 · minio | Custom endpoint URL (required for MinIO) |
+| `STORAGE_DISK_<NAME>_USE_PATH_STYLE` | bool | `false` (S3) / `true` (MinIO) | s3 · minio | Force path-style addressing |
+| `STORAGE_DISK_<NAME>_ACCESS_KEY` | string | _unset_ (resolved by SDK) | s3 · gcs · azure · minio | Explicit access key — usually leave unset and rely on SDK credential resolution |
+| `STORAGE_DISK_<NAME>_SECRET_KEY` | string | _unset_ | s3 · gcs · azure · minio | Explicit secret key |
+| `STORAGE_DISK_<NAME>_SESSION_TOKEN` | string | _unset_ | s3 | AWS STS session token |
+
+## Storage — heavy drivers (opt-in)
+
+Heavy drivers (`s3`, `gcs`, `azure`, `minio`) require an explicit blank import in consumer code; the SDK fails fast at boot with a clear hint if you select a heavy driver without importing its package.
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/s3"
+```
+
+Through v0.6.0 the heavy drivers are stubs that return `driver.ErrNotImplemented`. The full implementations land in v0.6.x patch releases — track CHANGELOG.
 
 ## HTTP middleware
 
@@ -181,4 +218,23 @@ OBSERVABILITY_TRACE_SAMPLE_RATE=1.0
 #
 # OBSERVABILITY_CHANNEL_BILLING_DRIVER=otlp
 # OBSERVABILITY_CHANNEL_BILLING_OTLP_ENDPOINT=billing-collector:4317
+
+# --- Storage (Laravel-style multi-disk; zero env vars ⇒ single local disk) ---
+# STORAGE_DEFAULT_DISK=local
+# STORAGE_DISKS=local,avatars,uploads
+#
+# STORAGE_DISK_LOCAL_DRIVER=local
+# STORAGE_DISK_LOCAL_ROOT=./storage
+# STORAGE_DISK_LOCAL_VISIBILITY=private
+#
+# STORAGE_DISK_AVATARS_DRIVER=local
+# STORAGE_DISK_AVATARS_ROOT=./storage/avatars
+# STORAGE_DISK_AVATARS_VISIBILITY=public
+# STORAGE_DISK_AVATARS_PUBLIC_URL=https://cdn.example.com/avatars
+#
+# # Cloud disks (require blank import — see storage docs)
+# STORAGE_DISK_UPLOADS_DRIVER=s3
+# STORAGE_DISK_UPLOADS_BUCKET=my-uploads
+# STORAGE_DISK_UPLOADS_REGION=ap-northeast-1
+# STORAGE_DISK_UPLOADS_VISIBILITY=private
 ```

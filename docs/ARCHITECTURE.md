@@ -2,7 +2,7 @@
 
 # Architecture
 
-godx-platform-framework is intentionally small — a backbone for modules, not a framework that owns your `main`. Every concern (observability today; storage, cache, queue, http tomorrow) is its own module and follows the same layout.
+godx-platform-framework is intentionally small — a backbone for modules, not a framework that owns your `main`. Every concern (observability and storage today; cache, queue, http tomorrow) is its own module and follows the same layout.
 
 ## Design principles
 
@@ -30,10 +30,17 @@ godx-platform-framework/
 │   ├── drivers/                        Built-in drivers, one package each
 │   │   ├── stdout/ · file/ · stack/    (light — auto-registered)
 │   │   ├── otlp/                       (heavy — opt-in blank import)
-│   │   └── cloudwatch/                 (heavy — opt-in; stub until 0.5.0)
+│   │   └── cloudwatch/                 (heavy — opt-in; stub until v0.7.0)
 │   └── middleware/                     Optional HTTP middleware sub-package
 │
-├── storage/                            Future — same skeleton (driver/, drivers/local|s3|gcs/, ...)
+├── storage/                            Module — Laravel-style multi-disk file/object storage
+│   ├── doc.go · module.go · config.go · disk.go · manager.go · context.go
+│   ├── register.go                     Blank-imports light drivers
+│   ├── driver/                         Public driver contract (interface, Spec, registry, Visibility)
+│   └── drivers/                        Built-in drivers, one package each
+│       ├── local/ · memory/            (light — auto-registered)
+│       └── s3/ · gcs/ · azure/ · minio/  (heavy — opt-in; stubs until v0.6.x patches)
+│
 ├── cache/                              Future — same skeleton (driver/, drivers/memory|redis/, ...)
 ├── queue/                              Future
 ├── httpx/                              Future
@@ -174,9 +181,9 @@ The same pattern repeats for every future module — see [DRIVER_PATTERN](./DRIV
 | 0.2.x | naming cleanup | env-var rename to full `OBSERVABILITY_*`; `Backend` → `Driver` |
 | 0.3.x | multi-channel | `stack` driver (Laravel fan-out), named channels (`obs.Channel("audit")`) |
 | 0.4.x | layout standardisation | per-driver subpackages, `<module>/driver` registry, `<module>/middleware` sub-package, opt-in heavy drivers |
-| 0.5.x | **channel maturity** | per-channel level filter, env-driven channels (`ChannelsFromEnv()`), per-sub stack level (`stdout:info,file:warn`) — Laravel `config/logging.php` parity |
-| 0.6.x | `cloudwatch` driver | AWS ADOT exporters; configurable correlation header |
-| 0.7.x | `storage` module | drivers: local · s3 · gcs · azure · minio |
+| 0.5.x | channel maturity | per-channel level filter, env-driven channels (`ChannelsFromEnv()`), per-sub stack level (`stdout:info,file:warn`) — Laravel `config/logging.php` parity |
+| 0.6.x | **`storage` module** | Laravel `Storage` parity — Manager, named Disks, drivers: local · memory (full); s3 · gcs · azure · minio (stubs, full impl across 0.6.x patches) |
+| 0.7.x | `cloudwatch` driver | AWS ADOT exporters; configurable correlation header |
 | 0.8.x | `cache` module | drivers: memory · redis · memcached |
 | 0.9.x | `queue` module | drivers: in-memory · sqs · kafka · nats |
 | 0.10.x | `httpx` module | chi router + handler conventions |

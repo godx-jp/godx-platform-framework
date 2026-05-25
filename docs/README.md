@@ -19,9 +19,9 @@ Index for the godx-platform-framework documentation.
 |--------|--------|------|
 | `framework` | stable | [ARCHITECTURE — backbone](./ARCHITECTURE.md#backbone-the-framework-package) |
 | `observability` | stable | [modules/observability](./modules/observability.md) |
-| `storage` | roadmap (v0.5+) | — |
-| `cache` | roadmap (v0.6+) | — |
-| `queue` | roadmap (v0.7+) | — |
-| `httpx` | roadmap (v0.8+) | — |
+| `storage` | stable (v0.6.x) | [modules/storage](./modules/storage.md) |
+| `cache` | roadmap (v0.8+) | — |
+| `queue` | roadmap (v0.9+) | — |
+| `httpx` | roadmap (v0.10+) | — |
 
 Future modules each get their own file under `docs/modules/`. The driver pattern, naming convention, and layout are pinned in [DRIVER_PATTERN](./DRIVER_PATTERN.md) so every new module is structurally identical.

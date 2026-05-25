@@ -3,14 +3,14 @@
 > **Opinionated Go SDK by godx** — modular, OpenTelemetry-native, backend-agnostic.
 > Write once, swap backends (godx-platform-observability ↔ AWS CloudWatch ↔ Datadog ↔ …) by changing one env var.
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](./LICENSE)
 [![Maintainer](https://img.shields.io/badge/by-godx-black.svg)](#)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](https://go.dev)
 
 ## Who is this for
 
-Any Go team that wants production-grade infrastructure without writing it from scratch — and without being locked into one vendor. v0.4 ships the observability module; storage, cache, queue, and httpx are on the roadmap and follow the same conventions.
+Any Go team that wants production-grade infrastructure without writing it from scratch — and without being locked into one vendor. v0.6 ships the observability and storage modules; cache, queue, and httpx are on the roadmap and follow the same conventions.
 
 | You have… | This gives you… |
 |-----------|-----------------|
@@ -89,10 +89,11 @@ go run .
 |--------|--------|---------|
 | `framework` | stable | App backbone — module registration, lifecycle, graceful shutdown |
 | `observability` | stable | Logs (slog JSON) + traces (OTel) + metrics (OTel) + Laravel-style channels |
-| `storage` | roadmap (v0.7) | object storage — local · s3 · gcs · azure · minio |
+| `storage` | stable (v0.6) | object storage — local · memory · s3 · gcs · azure · minio (heavy drivers ship in v0.6.x patches) |
 | `cache` | roadmap (v0.8) | caching — memory · redis · memcached |
 | `queue` | roadmap (v0.9) | messaging — in-memory · sqs · kafka · nats |
 | `httpx` | roadmap (v0.10) | chi router + handler conventions |
+| `observability/cloudwatch` | roadmap (v0.7) | full AWS CloudWatch driver for observability (stub today) |
 
 Every module follows the [driver pattern](./docs/DRIVER_PATTERN.md): top-level package, public `driver/` contract, per-implementation `drivers/<name>/` package, optional `middleware/` sub-package.
 
@@ -106,9 +107,39 @@ A **driver** is the in-process code that ships telemetry to a destination — se
 | File   | `file`   | stable | auto | bare-metal / VM, zero-budget, Laravel-style local file |
 | Stack  | `stack`  | stable | auto | fan-out: every log record to multiple sub-drivers (Laravel `stack` channel) |
 | OTLP   | `otlp`   | stable | opt-in (`_ "...drivers/otlp"`) | godx-platform-observability, Datadog, New Relic, any OTLP receiver |
-| CloudWatch | `cloudwatch` | stub | opt-in (`_ "...drivers/cloudwatch"`) | full impl in 0.6.0 (AWS ADOT) |
+| CloudWatch | `cloudwatch` | stub | opt-in (`_ "...drivers/cloudwatch"`) | full impl in v0.7.0 (AWS ADOT) |
 
 Plus **named channels** (Laravel-style per-call selection — `obs.Channel("audit").Info(...)`): see [docs/modules/observability — channels](./docs/modules/observability.md#channels-laravel-style-named-loggers). Channels can be declared in Go (`NewChannel(name, cfg)`) or purely via env vars (`OBSERVABILITY_CHANNELS=audit,billing` + per-channel env keys) using `ChannelsFromEnv()`. Each channel has its own minimum level. The `stack` driver also accepts per-sub level: `OBSERVABILITY_STACK_DRIVERS=stdout:info,file:warn`.
+
+## Drivers (storage)
+
+A **storage driver** is the in-process code that reads/writes objects on a specific backend — selected once at deploy time via per-disk env vars. Same opt-in convention as observability: light drivers auto-register, heavy ones require a blank import.
+
+| Driver | `STORAGE_DISK_<NAME>_DRIVER` | Status | Registration | Use case |
+|--------|------------------------------|--------|--------------|----------|
+| Local  | `local`  | stable | auto | filesystem (default — Laravel `local` disk) |
+| Memory | `memory` | stable | auto | tests, ephemeral fixtures |
+| S3     | `s3`     | stub (full impl in v0.6.x) | opt-in (`_ "...drivers/s3"`) | AWS S3 |
+| GCS    | `gcs`    | stub (full impl in v0.6.x) | opt-in (`_ "...drivers/gcs"`) | Google Cloud Storage |
+| Azure  | `azure`  | stub (full impl in v0.6.x) | opt-in (`_ "...drivers/azure"`) | Azure Blob Storage |
+| MinIO  | `minio`  | stub (full impl in v0.6.x) | opt-in (`_ "...drivers/minio"`) | MinIO / S3-compatible |
+
+Each disk has its own visibility default (`public`/`private`), public URL base, and (for cloud) bucket/region/credentials. Multiple disks live side by side under one `Manager`: `mgr.Disk("avatars").Put(...)`. Full reference: [docs/modules/storage](./docs/modules/storage.md).
+
+```go
+import (
+    "github.com/godx-jp/godx-platform-framework/framework"
+    "github.com/godx-jp/godx-platform-framework/storage"
+)
+
+app := framework.New("svc", "1.0.0").Use(storage.Module)
+_ = app.Init(ctx)
+
+mgr, _ := storage.FromApp(app)
+disk, _ := mgr.Disk("local")
+_ = disk.Put(ctx, "hello.txt", []byte("world"))
+body, _ := disk.Get(ctx, "hello.txt")
+```
 
 Adding a new driver: see [docs/DRIVER_PATTERN](./docs/DRIVER_PATTERN.md).
 
@@ -126,8 +157,13 @@ godx-platform-framework/
 │   ├── drivers/                        Built-in drivers — one package each
 │   │   ├── stdout/ · file/ · stack/    light, auto-registered
 │   │   ├── otlp/                       heavy, opt-in blank import
-│   │   └── cloudwatch/                 heavy, opt-in (stub until v0.5.0)
+│   │   └── cloudwatch/                 heavy, opt-in (stub until v0.7.0)
 │   └── middleware/                     Optional HTTP middleware sub-package
+├── storage/                            Multi-disk file/object storage
+│   ├── driver/                         Public driver contract (interface, Spec, registry)
+│   └── drivers/
+│       ├── local/ · memory/            light, auto-registered
+│       └── s3/ · gcs/ · azure/ · minio/  heavy, opt-in blank import (stubs in v0.6.0)
 ├── examples/
 │   ├── minimal/                        25-line example
 │   └── http-server/                    HTTP server with traced handler + middleware
@@ -161,6 +197,7 @@ The internal layout of every future module (storage, cache, queue, ...) is ident
 | [ARCHITECTURE](./docs/ARCHITECTURE.md) | Engineers — backbone, lifecycle, layout, roadmap |
 | [DRIVER_PATTERN](./docs/DRIVER_PATTERN.md) | Anyone touching drivers — shared convention for every module |
 | [modules/observability](./docs/modules/observability.md) | App developers using observability |
+| [modules/storage](./docs/modules/storage.md) | App developers using storage |
 | [CONFIGURATION](./docs/CONFIGURATION.md) | Operators — every env var |
 | [VERSIONING](./docs/VERSIONING.md) | Consumers — SemVer policy |
 

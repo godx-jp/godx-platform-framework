@@ -4,6 +4,27 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-25
+
+Storage-module release — adds a Laravel `Storage`-style multi-disk file/object abstraction. **Additive only** for existing consumers (observability is unchanged); the new `storage` module is opt-in via `app.Use(storage.Module)`.
+
+### Added — storage module
+
+- **`storage` package** — Laravel `Storage` facade parity for Go. A single `Manager` holds one or more named `Disk` handles; each disk is backed by a driver chosen at configuration time. Disks expose the full Laravel ergonomic API: `Put`, `Get`, `Exists`, `Missing`, `Delete`, `Copy`, `Move`, `Size`, `LastModified`, `Files`, `Directories`, `ReadStream`, `WriteStream`, `Append`, `Prepend`, `URL`, `TemporaryURL`, plus typed write options (`WithContentType`, `WithVisibility`, `WithMetadata`, `WithCacheControl`).
+- **Driver pattern** — identical to observability: public `storage/driver` package (interface, `Spec`, registry, `Visibility`, `Attributes`, `Entry`, `WriteOptions`, `ErrNotFound`/`ErrNotSupported`/`ErrNotImplemented`), one package per implementation under `storage/drivers/<name>/`. See [docs/DRIVER_PATTERN.md](docs/DRIVER_PATTERN.md).
+- **Light drivers (auto-registered)** — `local` (filesystem with path-traversal guard, visibility-to-file-mode mapping, optional public URL base) and `memory` (in-memory; great for tests).
+- **Heavy drivers (opt-in blank import)** — `s3`, `gcs`, `azure`, `minio` registered as stubs returning `driver.ErrNotImplemented` until their full implementation lands in v0.6.x patch releases. Misconfigurations surface at startup, not at first write.
+- **Multi-disk + default** — `STORAGE_DEFAULT_DISK` selects the default; `STORAGE_DISKS=avatars,uploads,cache` declares additional disks. Each disk loads its config from `STORAGE_DISK_<NAME>_*` env vars. Zero env vars set → single `local` disk rooted at `./storage`, private visibility.
+- **Programmatic API** — `storage.ModuleWithConfig(cfg)` for code-driven configuration; `storage.AddDisk(name, cfg)` for incrementally registering disks after the primary `Module`; `storage.NewDiskFromDriver(name, drv, cfg)` for wrapping a custom driver.
+- **Context plumbing** — `storage.ContextWithManager` / `storage.FromContext` / `storage.FromApp`, matching the observability ergonomics.
+- **Tests** — 27 new test functions covering local + memory drivers, multi-disk manager, env-driven disks, all stubs, ordering errors, path traversal, visibility round-trip, list semantics, append/prepend, copy/move, signed-URL fallback, and the heavy-driver blank-import error message. Race detector clean.
+
+### Roadmap shift
+
+- Storage promoted to v0.6.x (was: v0.7.x).
+- Full CloudWatch driver shifted to v0.7.x (was: v0.6.x).
+- Cache, queue, httpx remain on the roadmap in their original relative order.
+
 ## [0.5.0] — 2026-05-25
 
 Channel-system maturity release — closes the Laravel `config/logging.php` parity gap. All additions are **backward-compatible**; no consumer code change is required to upgrade from 0.4.0.
