@@ -100,7 +100,7 @@ go run .
 | `httpclient` | stable (v0.9.1) | stdlib + mock + resilient drivers, OTel transport |
 | `validation` | stable (v0.9.0) | struct-tag DSL, pluggable rule registry, i18n templates |
 | `ratelimit` | stable (v0.9.2) | memory + redis token bucket + HTTP middleware |
-| `mail` | roadmap (v0.10.0) | log · smtp · ses · sendgrid · mailgun · postmark |
+| `mail` | stable (v0.10.0) | log · smtp · ses · sendgrid · mailgun · postmark |
 | `notifications` | roadmap (v0.10.1) | mail · slack · discord · webhook · database · log channels |
 | `scheduler` | roadmap (v0.10.2) | cron expressions, distributed lock via cache module |
 | `featureflag` | roadmap (v0.10.3) | config · openfeature · launchdarkly · unleash · flagsmith |

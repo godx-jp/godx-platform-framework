@@ -4,6 +4,17 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-05-25
+
+Ships the `mail/` module — fluent mailer with log, SMTP, and opt-in cloud transports.
+
+### Added
+
+- **`mail/` module** — `Manager` + fluent `Mailer` (`To`, `Subject`, `Body`, `Send`).
+- **Drivers:** `log` (slog), `smtp` (net/smtp), `ses`, `sendgrid`, `mailgun`, `postmark` (heavy, blank-import).
+- **Events:** `mail.sending`, `mail.sent`, `mail.failed` when `events.Module` is wired.
+- **`examples/mail/main.go`**, **`docs/modules/mail.md`**.
+
 ## [0.11.0] — 2026-05-25
 
 Ships the `queue/` module — Laravel-style job queues with memory driver and heavy stubs for SQS, Kafka, and NATS.
