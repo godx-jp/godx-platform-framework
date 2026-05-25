@@ -9,6 +9,7 @@ import (
 
 const (
 	DriverMemory = "memory"
+	DriverRedis  = "redis"
 	DriverSQS    = "sqs"
 	DriverKafka  = "kafka"
 	DriverNATS   = "nats"

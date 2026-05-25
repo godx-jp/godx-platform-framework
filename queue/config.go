@@ -27,6 +27,9 @@ type QueueConfig struct {
 	NATSURL      string
 	Subject      string
 	StreamName   string
+	RedisURL     string
+	RedisAddress string
+	RedisPrefix  string
 }
 
 func (c Config) Validate() error {
@@ -75,6 +78,9 @@ func LoadConfigFromEnv() Config {
 			NATSURL:      env(prefix+"NATS_URL", env("NATS_URL", "")),
 			Subject:      env(prefix+"SUBJECT", ""),
 			StreamName:   env(prefix+"STREAM", ""),
+			RedisURL:     env(prefix+"REDIS_URL", env("REDIS_URL", "")),
+			RedisAddress: env(prefix+"REDIS_ADDRESS", env("REDIS_ADDRESS", "")),
+			RedisPrefix:  env(prefix+"REDIS_PREFIX", "godx:queue:"),
 		}
 		cfg.Queues[name] = qc
 	}

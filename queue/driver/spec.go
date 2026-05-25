@@ -25,5 +25,13 @@ type Spec struct {
 	Subject     string
 	StreamName  string
 
+	// Redis driver
+	URL      string
+	Address  string
+	Username string
+	Password string
+	DB       int
+	Prefix   string
+
 	Extra map[string]string
 }

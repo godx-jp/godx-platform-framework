@@ -78,6 +78,9 @@ func buildQueue(ctx context.Context, name string, qc QueueConfig, bus events.Bus
 		NATSURL:      qc.NATSURL,
 		Subject:      qc.Subject,
 		StreamName:   qc.StreamName,
+		URL:          qc.RedisURL,
+		Address:      qc.RedisAddress,
+		Prefix:       qc.RedisPrefix,
 	}
 	backend, err := qdriver.New(ctx, spec)
 	if err != nil {
