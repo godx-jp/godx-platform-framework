@@ -2,22 +2,20 @@ package middleware
 
 import (
 	"net/http"
-	"time"
 
-	rlmw "github.com/godx-jp/godx-platform-framework/ratelimit/middleware"
 	rdriver "github.com/godx-jp/godx-platform-framework/ratelimit/driver"
+	rlmw "github.com/godx-jp/godx-platform-framework/ratelimit/middleware"
 )
 
-// RateLimit wraps the ratelimit module HTTP middleware for httpx stacks.
+// RateLimit returns middleware that rate-limits by keyFunc using limiter l.
 func RateLimit(l rdriver.Limiter, keyFunc rlmw.KeyFunc) func(http.Handler) http.Handler {
-	return rlmw.Handler(rlmw.Options{
-		Limiter:    l,
-		KeyFunc:    keyFunc,
-		RetryAfter: time.Second,
-	})
+	if keyFunc == nil {
+		keyFunc = rlmw.ByIP
+	}
+	return rlmw.Limit(l, keyFunc)
 }
 
-// RateLimitByIP is a convenience wrapper using client IP keys.
+// RateLimitByIP rate-limits requests by client IP.
 func RateLimitByIP(l rdriver.Limiter) func(http.Handler) http.Handler {
-	return RateLimit(l, rlmw.ByIP)
+	return rlmw.Limit(l, rlmw.ByIP)
 }

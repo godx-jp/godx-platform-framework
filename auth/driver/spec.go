@@ -1,7 +1,10 @@
 package driver
 
+import "time"
+
 const (
 	DriverJWT        = "jwt"
+	DriverHMAC       = "hmac"
 	DriverAPIKey     = "apikey"
 	DriverIntrospect = "introspect"
 )
@@ -36,6 +39,10 @@ type Spec struct {
 
 	// ── introspect driver ────────────────────────────────────────
 	IntrospectURL string
+
+	// ── hmac driver (symmetric HS256 JWT) ────────────────────────
+	LeewaySeconds int64
+	MaxTokenTTL   time.Duration
 
 	Extra map[string]string
 }

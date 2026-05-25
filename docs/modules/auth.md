@@ -254,6 +254,45 @@ if errors.Is(err, driver.ErrInvalidCredential) {
 }
 ```
 
+## HMAC guard (symmetric service JWT)
+
+Use the `hmac` driver for closed service-to-service auth with a shared HS256 secret (RFC 7519 + RFC 6750 Bearer). Prefer the `jwt` guard (JWKS / RS256) for user-facing APIs and public IdP integration.
+
+```bash
+AUTH_GUARDS=service
+AUTH_DEFAULT=service
+AUTH_GUARD_SERVICE_DRIVER=hmac
+AUTH_GUARD_SERVICE_SECRET=your-32-byte-or-longer-shared-secret
+AUTH_GUARD_SERVICE_AUDIENCE=orders-service
+AUTH_GUARD_SERVICE_LEEWAY_SECONDS=30
+```
+
+Programmatic guard:
+
+```go
+mgr := auth.NewManager()
+g, _ := driver.New(ctx, driver.Spec{
+    Name: driver.DriverHMAC,
+    Secret: os.Getenv("INTER_SERVICE_SECRET"),
+    Audience: "orders-service",
+})
+_ = mgr.AddGuard("service", g)
+_ = mgr.SetResolver("service", auth.BearerTokenResolver())
+```
+
+Custom JWT claims land in `Principal.Claims`. Read them with `auth.ClaimString(p, "tenant_id")` or map access.
+
+Dev/test token minting (not for production hot paths):
+
+```go
+import "github.com/godx-jp/godx-platform-framework/auth/token"
+
+tok, err := token.IssueHS256(token.HMACOptions{
+    Secret: []byte(secret), Issuer: "caller", Audience: "orders-service", Subject: "caller",
+    Claims: map[string]any{"tenant_id": "t1"}, TTL: time.Minute,
+})
+```
+
 ## Context propagation
 
 `auth.ContextWithPrincipal(ctx, p)` attaches the principal (and, when `p.Guard` is set, also binds it under that guard via `ContextWithPrincipalForGuard`). `PrincipalFromContext` / `PrincipalForGuard` read it back. `auth.ContextWithManager` / `auth.FromContext` carry the `*Manager` itself for handlers that prefer pulling it from context. `auth.FromApp(app)` is the canonical way to retrieve the manager built by `auth.Module`.

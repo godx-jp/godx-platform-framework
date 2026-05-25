@@ -124,6 +124,25 @@ When `SetProblemTypeBaseURL` is not called, `TypeURI` falls back to `urn:problem
 
 Mount Swagger UI before auth middleware: `httpx.MountOpenAPI(r, httpx.OpenAPIConfig{Title: "Orders API", Spec: specBytes})`.
 
+## Recommended middleware stack
+
+Outer → inner on a chi router:
+
+```
+observability/middleware.HTTP   # trace + correlation + access log
+  → httpx/middleware.Recover
+  → httpx/middleware.RequestID  # X-Request-ID
+  → httpx/middleware.RateLimit  # optional, per route group
+  → auth/middleware.Authenticate
+  → handler
+```
+
+| `httpx/middleware` | Purpose |
+|---|---|
+| `Recover()` | Panic recovery with structured log |
+| `RequestID()` / `RequestIDFrom(ctx)` | `X-Request-ID` propagation |
+| `RateLimit(l, keyFn)` / `RateLimitByIP(l)` | RFC 9110 429 + Retry-After |
+
 ## Middleware
 
 The `httpx/middleware` package (imported here as `hmw`) adapts framework modules into the standard `func(http.Handler) http.Handler` shape.

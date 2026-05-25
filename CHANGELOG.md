@@ -2,6 +2,24 @@
 
 All notable changes are documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · versioning: [SemVer](https://semver.org/).
 
+## [1.7.0] — 2026-05-26
+
+Middleware stack release: symmetric JWT auth, HTTP cross-cutting helpers, ratelimit ergonomics.
+
+### Added
+
+- **auth v1.3** — `hmac` guard driver (HS256 Bearer JWT, RFC 7519/6750); env `AUTH_GUARD_*_SECRET`, `_AUDIENCE`, `_LEEWAY_SECONDS`.
+- **auth/token** — `IssueHS256` for tests and dev tooling (production services verify only).
+- **auth** — `ClaimString(p, key)` helper; `hmac` wired in `register.go` and default Bearer resolver.
+- **httpx/middleware** — `RequestID()` / `RequestIDFrom` (`X-Request-ID`, UUID v7 fallback); `Recover()` (panic → 500 + structured log).
+- **httpx/middleware** — `RateLimit` / `RateLimitByIP` wrappers for `ratelimit/middleware`.
+- **ratelimit** — memory driver idle key eviction via `Spec.TTL` background GC.
+
+### Changed
+
+- **docs/modules/auth.md** — HMAC guard section (tradeoffs vs JWKS RS256).
+- **docs/modules/httpx.md** — recommended middleware stack order (observability → recover → request-id → auth).
+
 ## [1.6.0] — 2026-05-25
 
 Production hardening for queue, messaging, and scheduler modules.

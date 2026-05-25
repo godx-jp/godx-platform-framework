@@ -29,7 +29,7 @@ type Spec struct {
 	Password string
 	DB       int
 
-	// TTL caps idle bucket keys on Redis (zero → derived from burst/rate).
+	// TTL caps idle bucket keys on Redis (memory: idle eviction interval).
 	TTL time.Duration
 
 	Extra map[string]string

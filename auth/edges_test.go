@@ -105,6 +105,9 @@ func TestLightDriversAutoRegister(t *testing.T) {
 	if adriver.Lookup(adriver.DriverAPIKey) == nil {
 		t.Fatalf("apikey driver not auto-registered")
 	}
+	if adriver.Lookup(adriver.DriverHMAC) == nil {
+		t.Fatalf("hmac driver not auto-registered")
+	}
 }
 
 func TestAPIKeyGuardShutdownBlocksOps(t *testing.T) {

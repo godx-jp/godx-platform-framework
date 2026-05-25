@@ -23,6 +23,8 @@ const (
 	envGuardHeader = "AUTH_GUARD_%s_HEADER"
 	envGuardKeys   = "AUTH_GUARD_%s_KEYS"
 	envGuardIntro  = "AUTH_GUARD_%s_INTROSPECT_URL"
+	envGuardSecret = "AUTH_GUARD_%s_SECRET"
+	envGuardLeeway = "AUTH_GUARD_%s_LEEWAY_SECONDS"
 
 	envGuardKeyRoles = "AUTH_GUARD_%s_KEY_%s_ROLES"
 	envGuardKeyPerms = "AUTH_GUARD_%s_KEY_%s_PERMISSIONS"
@@ -66,7 +68,7 @@ func inferDriver(name string) string {
 		return v
 	}
 	switch strings.ToLower(name) {
-	case adriver.DriverJWT, adriver.DriverAPIKey, adriver.DriverIntrospect:
+	case adriver.DriverJWT, adriver.DriverAPIKey, adriver.DriverIntrospect, adriver.DriverHMAC:
 		return strings.ToLower(name)
 	default:
 		return name
@@ -98,6 +100,12 @@ func loadSpec(name, driver string) adriver.Spec {
 		spec.Header = v
 	}
 	spec.IntrospectURL = os.Getenv(fmt.Sprintf(envGuardIntro, envKey(name)))
+	spec.Secret = os.Getenv(fmt.Sprintf(envGuardSecret, envKey(name)))
+	if v := os.Getenv(fmt.Sprintf(envGuardLeeway, envKey(name))); v != "" {
+		if n, err := parseInt64(v); err == nil {
+			spec.LeewaySeconds = n
+		}
+	}
 	if keysCSV := os.Getenv(fmt.Sprintf(envGuardKeys, envKey(name))); keysCSV != "" {
 		spec.Keys = parseAPIKeys(name, keysCSV)
 	}
@@ -167,4 +175,11 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+func parseInt64(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	var n int64
+	_, err := fmt.Sscanf(s, "%d", &n)
+	return n, err
 }

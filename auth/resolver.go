@@ -87,7 +87,8 @@ func GuardResolver(guardName string, resolve CredentialResolver) CredentialResol
 // ResolverForGuard picks a default resolver based on driver name.
 func ResolverForGuard(driverName, header string) (CredentialResolver, error) {
 	switch driverName {
-	case adriver.DriverJWT:
+	case adriver.DriverJWT, adriver.DriverIntrospect, adriver.DriverHMAC:
+		// Bearer token from Authorization header.
 		return BearerTokenResolver(), nil
 	case adriver.DriverAPIKey:
 		return APIKeyHeaderResolver(header), nil

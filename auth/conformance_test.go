@@ -15,6 +15,7 @@ import (
 
 	adriver "github.com/godx-jp/godx-platform-framework/auth/driver"
 	_ "github.com/godx-jp/godx-platform-framework/auth/drivers/introspect"
+	_ "github.com/godx-jp/godx-platform-framework/auth/drivers/hmac"
 	jwtlib "github.com/golang-jwt/jwt/v5"
 )
 
@@ -154,7 +155,45 @@ func introspectCase() guardCase {
 func TestConformance(t *testing.T) {
 	runGuardConformance(t, apikeyCase())
 	runGuardConformance(t, jwtCase(t))
+	runGuardConformance(t, hmacCase())
 	runGuardConformance(t, introspectCase())
+}
+
+func hmacCase() guardCase {
+	secret := "01234567890123456789012345678901"
+	tok, err := issueConformanceHMAC(secret, "svc", "orders", "svc")
+	if err != nil {
+		panic(err)
+	}
+	return guardCase{
+		name: adriver.DriverHMAC,
+		build: func(t *testing.T) adriver.Guard {
+			t.Helper()
+			g, err := adriver.New(context.Background(), adriver.Spec{
+				Name:     adriver.DriverHMAC,
+				Secret:   secret,
+				Audience: "orders",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return g
+		},
+		valid:   &adriver.CredentialRequest{Token: tok},
+		invalid: &adriver.CredentialRequest{Token: "not-a-jwt"},
+	}
+}
+
+func issueConformanceHMAC(secret, iss, aud, sub string) (string, error) {
+	mc := jwtlib.MapClaims{
+		"iss": iss,
+		"aud": aud,
+		"sub": sub,
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(time.Hour).Unix(),
+	}
+	tok := jwtlib.NewWithClaims(jwtlib.SigningMethodHS256, mc)
+	return tok.SignedString([]byte(secret))
 }
 
 func newConformanceJWKS(t *testing.T) (*rsa.PrivateKey, string) {
