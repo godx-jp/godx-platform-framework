@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -58,8 +59,37 @@ func New(ctx context.Context, spec hdriver.Spec) (hdriver.Client, error) {
 		cb: resilience.NewCircuitBreaker(resilience.CircuitBreakerConfig{
 			MaxFailures:  maxFail,
 			ResetTimeout: reset,
+			// Surface state changes out of the box so a tripping
+			// breaker — a leading indicator of an unhealthy upstream —
+			// is no longer silent (RFC 0001 G4). Callers that need a
+			// different sink can construct their own breaker.
+			OnStateChange: cbStateLogger(spec),
 		}),
 	}, nil
+}
+
+// cbStateLogger returns an OnStateChange callback that logs circuit
+// breaker transitions via the default slog logger: Warn when the
+// breaker opens (load shedding has begun) and Info when it returns to
+// closed (the upstream recovered). The half-open probe phase is logged
+// at Debug. The target's BaseURL, when known, is attached so operators
+// can tell which dependency tripped.
+func cbStateLogger(spec hdriver.Spec) func(from, to resilience.State) {
+	attrs := []any{slog.String("driver", hdriver.DriverResilient)}
+	if spec.BaseURL != "" {
+		attrs = append(attrs, slog.String("target", spec.BaseURL))
+	}
+	return func(from, to resilience.State) {
+		args := append([]any{slog.String("from", from.String()), slog.String("to", to.String())}, attrs...)
+		switch to {
+		case resilience.StateOpen:
+			slog.Warn("circuit breaker opened", args...)
+		case resilience.StateClosed:
+			slog.Info("circuit breaker closed", args...)
+		default:
+			slog.Debug("circuit breaker state change", args...)
+		}
+	}
 }
 
 func (c *client) Name() string { return hdriver.DriverResilient }

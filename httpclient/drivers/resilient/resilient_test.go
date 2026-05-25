@@ -1,9 +1,13 @@
 package resilient_test
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -89,6 +93,67 @@ func Test5xxNotRetriedForUnsafeMethods(t *testing.T) {
 				t.Fatalf("%s on 5xx: got %d attempts, want exactly 1 (no retry)", method, got)
 			}
 		})
+	}
+}
+
+// syncBuffer is a concurrency-safe io.Writer for capturing slog output;
+// the resilient driver may emit from a retry goroutine.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// TestCircuitBreakerLogsOpen verifies the resilient driver's default
+// OnStateChange logs a Warn-level "circuit breaker opened" line when the
+// breaker trips, closing RFC 0001 G4 (the silent breaker).
+func TestCircuitBreakerLogsOpen(t *testing.T) {
+	var sink syncBuffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&sink, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(prev)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	// MaxFailures=2, no retries: each safe GET that 5xxs records one
+	// failure, so two GETs trip the breaker.
+	c, err := hdriver.New(context.Background(), hdriver.Spec{
+		Name:           hdriver.DriverResilient,
+		BaseURL:        srv.URL,
+		MaxRetries:     0,
+		RetryBackoff:   time.Millisecond,
+		CBMaxFailures:  2,
+		CBResetTimeout: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	do(t, c, http.MethodGet)
+	do(t, c, http.MethodGet)
+
+	out := sink.String()
+	if !strings.Contains(out, "circuit breaker opened") {
+		t.Fatalf("missing open log line; got:\n%s", out)
+	}
+	if !strings.Contains(out, "level=WARN") {
+		t.Fatalf("open should log at WARN; got:\n%s", out)
+	}
+	if !strings.Contains(out, "to=open") || !strings.Contains(out, "target="+srv.URL) {
+		t.Fatalf("expected to=open and target attr; got:\n%s", out)
 	}
 }
 

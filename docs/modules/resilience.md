@@ -106,21 +106,70 @@ The last observed error is returned when all attempts are exhausted.
 func NewCircuitBreaker(cfg CircuitBreakerConfig) *CircuitBreaker
 
 type CircuitBreakerConfig struct {
-    MaxFailures  int           // default 5
-    ResetTimeout time.Duration // default 30s
+    MaxFailures   int                    // default 5
+    ResetTimeout  time.Duration          // default 30s
+    OnStateChange func(from, to State)   // optional; nil = silent (default)
 }
 
 func (b *CircuitBreaker) Allow() error   // ErrOpen while open, else nil
 func (b *CircuitBreaker) Success()        // reset failure count, close
 func (b *CircuitBreaker) Failure()        // record a failure; open at MaxFailures
+func (b *CircuitBreaker) State() State    // current observable state
 ```
 
 The breaker is a **consecutive-failure** counter. `Failure` increments
 the count; once it reaches `MaxFailures` the breaker opens for
 `ResetTimeout`. While open, `Allow` returns `ErrOpen`. After the reset
-window elapses `Allow` permits a call again; a single `Success` clears
-the count. There is no explicit half-open state — the next call after
-the window is simply allowed through.
+window elapses the next `Allow` permits a single probe call (the
+**half-open** phase); a `Success` on that probe clears the count and
+closes the breaker, while a `Failure` re-opens it for another
+`ResetTimeout`.
+
+#### Observable state — `State` and `OnStateChange`
+
+```go
+type State int // StateClosed, StateOpen, StateHalfOpen
+
+func (s State) String() string // "closed" | "open" | "half-open"
+```
+
+The transitions the breaker makes are surfaced through the optional
+`OnStateChange(from, to)` callback:
+
+| Transition | Trigger |
+|---|---|
+| `StateClosed → StateOpen` | `MaxFailures` consecutive failures |
+| `StateOpen → StateHalfOpen` | first `Allow`/`State` after `ResetTimeout` elapses |
+| `StateHalfOpen → StateClosed` | a `Success` on the probe |
+| `StateHalfOpen → StateOpen` | a `Failure` on the probe |
+
+`OnStateChange` fires **exactly once per actual transition** — repeated
+same-state operations (e.g. an `Allow` that finds the breaker still
+open) do not call it. `nil` (the default) keeps the original behaviour
+with zero overhead.
+
+A breaker opening is a **leading indicator** of an unhealthy dependency:
+failures already crossed the threshold and the breaker is now shedding
+load. Wiring `OnStateChange` turns that silent event into an early
+warning worth alerting on. The callback runs **outside** the breaker's
+lock, so it is safe to log, emit a metric, or push to an error reporter
+from inside it (it may even call back into the breaker):
+
+```go
+cb := resilience.NewCircuitBreaker(resilience.CircuitBreakerConfig{
+    MaxFailures:  5,
+    ResetTimeout: 30 * time.Second,
+    OnStateChange: func(from, to resilience.State) {
+        switch to {
+        case resilience.StateOpen:
+            // Leading indicator — alert / page / report on this.
+            slog.Warn("payments breaker opened", "from", from, "to", to)
+        case resilience.StateClosed:
+            slog.Info("payments breaker recovered", "from", from, "to", to)
+        }
+    },
+})
+```
 
 ### Bulkhead
 

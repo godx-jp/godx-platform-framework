@@ -163,6 +163,7 @@ Wraps `stdlib` with:
 - Retry on transport errors and on `5xx` responses, **only for the RFC 7231 "safe" methods** (`GET`, `HEAD`, `OPTIONS`, `TRACE`).
 - Exponential backoff with jitter (`MaxAttempts = MaxRetries + 1`).
 - A circuit breaker that opens after `CBMaxFailures` consecutive failures and half-opens after `CBResetTimeout`.
+- **Observable breaker (out of the box).** The driver wires the breaker's `OnStateChange` to the default `log/slog` logger, so state changes are never silent: a transition to **open** logs at **Warn** (`"circuit breaker opened"`) and the return to **closed** logs at **Info**, each with `from`/`to`, the `driver` name, and the `target` base URL. A breaker opening is a leading indicator of an unhealthy upstream — this surfaces it without any caller wiring. See [resilience › Observable state](resilience.md#observable-state--state-and-onstatechange).
 
 > **Security — retries are scoped to safe methods.** Non-safe methods (`POST`, `PUT`, `PATCH`, `DELETE`) are **never retried**, neither on a `5xx` response nor on a transport error. Retrying them could duplicate side effects (a second write/charge/delete) and multiply load on a struggling upstream, since the request may already have reached the server. Such failures still count against the circuit breaker but are returned to the caller after a single attempt.
 
