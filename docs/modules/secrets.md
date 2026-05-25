@@ -166,6 +166,8 @@ default:                                           // success
 
 - Stores are not designed to *transform* secrets — they store and retrieve raw bytes. Pair with the [`encryption`](encryption.md) module if you need ciphertext-at-rest semantics on top of a backend that already encrypts at rest (e.g. KMS-backed values stored in a relational DB).
 - The `file` driver writes 0600-mode files via atomic temp+rename to avoid partial reads.
+- The `file` driver confines all filesystem access to its root with `os.Root` (Go 1.24+): symlinks that resolve outside the root are not traversed, so a symlink planted on a shared volume cannot redirect `Get`/`List`/`Put` to an out-of-root target (e.g. `/etc/shadow`). Lexical `../` key rejection is kept as defense-in-depth.
+- The `awssm` driver's `Forget` deletes secrets using AWS Secrets Manager's default recovery window (7–30 days) rather than `ForceDeleteWithoutRecovery`, so an accidental or injected delete can be reversed with `RestoreSecret`.
 - The `env` driver is intentionally read-only; production env vars are immutable from the process's perspective.
 - The `vault` driver stores values base64-encoded under a `value` field of a KV-v2 secret, allowing binary payloads. Plain-string secrets written manually outside the driver remain readable verbatim.
 

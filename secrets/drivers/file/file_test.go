@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	sdriver "github.com/godx-jp/godx-platform-framework/secrets/driver"
@@ -225,6 +226,78 @@ func TestConstructorRequiresPath(t *testing.T) {
 	c := sdriver.Lookup(sdriver.DriverFile)
 	if _, err := c(context.Background(), sdriver.Spec{Name: sdriver.DriverFile}); err == nil {
 		t.Fatalf("missing spec.Path should error")
+	}
+}
+
+func TestSymlinkEscapeRefused(t *testing.T) {
+	root := t.TempDir()
+	// An out-of-root target holding "secret" content the attacker wants
+	// to exfiltrate / overwrite.
+	outside := t.TempDir()
+	target := filepath.Join(outside, "shadow")
+	if err := os.WriteFile(target, []byte("root:secret"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+
+	// Plant a symlink inside the root pointing at the out-of-root file,
+	// and a symlinked subdir for the nested case.
+	link := filepath.Join(root, "creds")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unsupported on this platform: %v", err)
+	}
+	dirLink := filepath.Join(root, "escape")
+	if err := os.Symlink(outside, dirLink); err != nil {
+		t.Skipf("symlinks unsupported on this platform: %v", err)
+	}
+
+	s, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer s.Shutdown(context.Background())
+	ctx := context.Background()
+
+	// Get must not follow the symlink to read the out-of-root file.
+	if v, err := s.Get(ctx, "creds"); err == nil {
+		t.Fatalf("Get followed symlink, leaked %q", v)
+	}
+	// Get through a symlinked directory must also be refused.
+	if v, err := s.Get(ctx, "escape/shadow"); err == nil {
+		t.Fatalf("Get traversed symlinked dir, leaked %q", v)
+	}
+
+	// Put through a symlinked directory must be refused (os.Root will
+	// not traverse the intermediate symlink).
+	if err := s.Put(ctx, "escape/shadow", []byte("attacker")); err == nil {
+		t.Fatalf("Put traversed symlinked dir (should be refused)")
+	}
+	// Put to a leaf that is itself a symlink must NOT write through the
+	// link to the out-of-root target. The atomic temp+rename replaces
+	// the symlink with a real in-root file instead, so the value is
+	// recoverable in-root and the out-of-root target is left intact.
+	if err := s.Put(ctx, "creds", []byte("attacker")); err != nil {
+		t.Fatalf("Put over leaf symlink: %v", err)
+	}
+	// The out-of-root target must be untouched by either Put.
+	if b, _ := os.ReadFile(target); string(b) != "root:secret" {
+		t.Fatalf("out-of-root file was modified: %q", b)
+	}
+	// The replacement is a confined in-root regular file.
+	if v, err := s.Get(ctx, "creds"); err != nil || string(v) != "attacker" {
+		t.Fatalf("after Put over symlink: v=%q err=%v", v, err)
+	}
+
+	// List must not descend through the symlinked dir to enumerate
+	// out-of-root files. The symlink entries themselves are non-regular
+	// and must not appear as keys.
+	keys, err := s.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, k := range keys {
+		if strings.HasPrefix(k, "escape/") {
+			t.Fatalf("List traversed symlinked dir: %v", keys)
+		}
 	}
 }
 

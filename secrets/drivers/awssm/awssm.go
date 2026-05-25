@@ -127,9 +127,12 @@ func (s *store) Forget(ctx context.Context, key string) error {
 	if key == "" {
 		return nil
 	}
+	// Do NOT set ForceDeleteWithoutRecovery: leaving it unset lets AWS
+	// apply its default recovery window (7–30 days), so a Forget reached
+	// by a bug or injection is recoverable via RestoreSecret rather than
+	// destroying the secret irrecoverably.
 	_, err := s.cli.DeleteSecret(ctx, &secretsmanager.DeleteSecretInput{
-		SecretId:                   aws.String(s.secretName(key)),
-		ForceDeleteWithoutRecovery: aws.Bool(true),
+		SecretId: aws.String(s.secretName(key)),
 	})
 	if err != nil {
 		var nf *smtypes.ResourceNotFoundException
