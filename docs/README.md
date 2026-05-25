@@ -32,7 +32,8 @@ Index for the godx-platform-framework documentation.
 | `ratelimit` | stable (v0.9.2) | [modules/ratelimit](./modules/ratelimit.md) |
 | `mail` | stable (v0.10.0) | [modules/mail](./modules/mail.md) |
 | `notifications` | stable (v0.10.1) | [modules/notifications](./modules/notifications.md) |
-| `scheduler`, `featureflag`, `resilience` | roadmap (v0.10.x) | — |
+| `scheduler` | stable (v0.13.0) | [modules/scheduler](./modules/scheduler.md) |
+| `featureflag`, `resilience` | roadmap (v0.13.x) | — |
 | `queue` | stable (v0.11.0) | [modules/queue](./modules/queue.md) |
 | `httpx` | roadmap (v0.12) | — |
 | `health` | roadmap (v0.14) | — |

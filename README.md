@@ -3,7 +3,7 @@
 > **Opinionated Go SDK by godx** — modular, OpenTelemetry-native, backend-agnostic.
 > Write once, swap backends (godx-platform-observability ↔ AWS CloudWatch ↔ Datadog ↔ …) by changing one env var.
 
-[![Version](https://img.shields.io/badge/version-0.12.0-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.13.0-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](./LICENSE)
 [![Maintainer](https://img.shields.io/badge/by-godx-black.svg)](#)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](https://go.dev)
@@ -102,7 +102,7 @@ go run .
 | `ratelimit` | stable (v0.9.2) | memory + redis token bucket + HTTP middleware |
 | `mail` | stable (v0.10.0) | log · smtp · ses · sendgrid · mailgun · postmark |
 | `notifications` | stable (v0.10.1) | mail · slack · discord · webhook · database · log channels |
-| `scheduler` | roadmap (v0.10.2) | cron expressions, distributed lock via cache module |
+| `scheduler` | stable (v0.13.0) | cron expressions, distributed lock via cache module |
 | `featureflag` | roadmap (v0.10.3) | config · openfeature · launchdarkly · unleash · flagsmith |
 | `resilience` | roadmap (v0.10.4) | retry · circuit-breaker · timeout · bulkhead primitives |
 | `queue` | stable (v0.11.0) | memory · sqs · kafka · nats — Push/Dispatch, job lifecycle events |

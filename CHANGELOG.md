@@ -4,6 +4,17 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-05-25
+
+Ships the `scheduler/` module — cron-based job scheduling with overlap protection and distributed locks.
+
+### Added
+
+- **`scheduler/` module** — `EveryMinute()`, `Cron(expr)`, `WithoutOverlapping()`, `OnOneServer()` fluent API (robfig/cron/v3).
+- **`scheduler/lock`** — in-process `Memory` mutex and `Cache` adapter (`cache.Store` Add/Forget integration).
+- **`scheduler.Module`** — env-driven (`SCHEDULER_ENABLED`, `SCHEDULER_LOCK_TTL`, `SCHEDULER_LOCK_PREFIX`).
+- **`examples/scheduler/main.go`**, **`docs/modules/scheduler.md`**.
+
 ## [0.10.1] — 2026-05-25
 
 Ships the `notifications/` module — multi-channel Laravel-style notifications.
