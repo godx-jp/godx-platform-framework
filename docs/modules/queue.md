@@ -114,7 +114,7 @@ connection's configured default queue. Payloads are opaque `[]byte`.
 |---|---|---|
 | `q.Push(ctx, queue, payload) (driver.Job, error)` | Enqueue payload | `Queue::push` |
 | `q.Dispatch(ctx, queue, handler) error` | Pop one job, run handler, emit events, retry/DLQ on failure | `Worker` single tick |
-| `q.Run(ctx, queue) error` | Start `WithWorkers(n)` goroutines that loop `Dispatch` until `ctx` is canceled or `Stop` | `queue:work` |
+| `q.Run(ctx, queue) error` | Start `WithWorkers(n)` goroutines that loop `Dispatch` until `ctx` is canceled or `Stop` (backs off on backend errors — see below) | `queue:work` |
 | `q.Stop()` | Signal `Run` workers to exit and wait for them | — |
 | `q.Shutdown(ctx) error` | `Stop` then close the backend | — |
 | `q.Name() string` / `q.Backend() driver.Backend` | Accessors | — |
@@ -123,6 +123,24 @@ When `Dispatch` receives a `nil` handler it falls back to the handler set
 via `WithHandler`; if neither exists it returns an error. `Run` always
 uses the default handler, so a `Run`-based worker must be constructed
 with `WithHandler`.
+
+#### Worker loop & backend backoff
+
+Each `Run` worker pops with a 100 ms timeout, so an idle (empty) queue is
+paced by that timeout — workers do not spin. After a job is processed the
+worker loops immediately to stay responsive under load.
+
+If a pop fails with a **real backend error** (e.g. Redis unreachable),
+the worker would otherwise retry instantly, busy-spinning a CPU and
+hammering the failing backend. Instead it sleeps an **exponential backoff**
+before the next attempt: starting at 100 ms, doubling per consecutive
+error, capped at 5 s, and reset to the base on the next successful (or
+empty) cycle. The empty-queue pop timeout and the error backoff are never
+applied together, so a healthy idle queue is not slowed.
+
+The backoff sleep is **interruptible** by both `ctx` cancellation and
+`Stop()`, so workers still exit promptly even while waiting out a failing
+backend.
 
 ### Construction options
 

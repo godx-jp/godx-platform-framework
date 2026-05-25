@@ -17,6 +17,19 @@ const (
 	EventDead       = "job.dead"
 )
 
+const (
+	// runPopTimeout bounds how long a single Run worker waits for a job
+	// before looping; an idle (empty-queue) wait is paced by this alone.
+	runPopTimeout = 100 * time.Millisecond
+	// runErrBackoffBase / runErrBackoffMax bound the exponential backoff a
+	// Run worker applies after a real backend error (e.g. Redis down) to
+	// avoid busy-spinning a failing backend. The delay starts at base,
+	// doubles per consecutive error, caps at max, and resets on the next
+	// non-error cycle.
+	runErrBackoffBase = 100 * time.Millisecond
+	runErrBackoffMax  = 5 * time.Second
+)
+
 // Queue is the user-facing handle for one named queue connection.
 type Queue struct {
 	name         string
@@ -179,25 +192,64 @@ func (q *Queue) Run(ctx context.Context, queue string) error {
 	workers := q.workers
 	q.mu.Unlock()
 
+	stop := q.stop
 	for i := 0; i < workers; i++ {
 		q.wg.Add(1)
 		go func() {
 			defer q.wg.Done()
+			backoff := runErrBackoffBase
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				case <-q.stop:
+				case <-stop:
 					return
 				default:
 				}
-				popCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-				_ = q.Dispatch(popCtx, queue, nil)
+				popCtx, cancel := context.WithTimeout(ctx, runPopTimeout)
+				err := q.Dispatch(popCtx, queue, nil)
+				popErr := popCtx.Err()
 				cancel()
+
+				// A real backend error is one Dispatch surfaced that was
+				// NOT caused by the per-pop timeout (an idle empty queue
+				// is already paced by runPopTimeout) and NOT by parent ctx
+				// cancellation (handled by the loop guard). Back off only
+				// for genuine backend failures to avoid busy-spinning.
+				if err != nil && popErr == nil && ctx.Err() == nil {
+					if !q.sleep(ctx, stop, backoff) {
+						return
+					}
+					if backoff < runErrBackoffMax {
+						backoff *= 2
+						if backoff > runErrBackoffMax {
+							backoff = runErrBackoffMax
+						}
+					}
+					continue
+				}
+				// Success or empty queue: stay responsive, reset backoff.
+				backoff = runErrBackoffBase
 			}
 		}()
 	}
 	return nil
+}
+
+// sleep waits for d or until ctx is canceled or stop is closed. It returns
+// false if the worker should exit (ctx canceled or stop closed), keeping
+// Stop() prompt even mid-backoff.
+func (q *Queue) sleep(ctx context.Context, stop <-chan struct{}, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-stop:
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 // Stop signals Run workers to exit and waits for them.
