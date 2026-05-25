@@ -2,6 +2,15 @@
 
 All notable changes are documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · versioning: [SemVer](https://semver.org/).
 
+## [1.8.1] — 2026-05-26
+
+### Added
+
+- **storage/driver** — `SignedPutURL` for presigned browser uploads (PUT).
+- **storage.Disk** — `TemporaryUploadURL`, `DeletePrefix`, `BuildDisk`.
+- **storage** — S3/GCS/Azure drivers implement presigned PUT; local/memory return `ErrNotSupported`.
+- **cache** — export `BuildStore` for TBK services mapping flat env to a single named store.
+
 ## [1.8.0] — 2026-05-25
 
 Production-ready EDA release: outbox poller, NATS JetStream hardening, CloudEvents conformance pin.

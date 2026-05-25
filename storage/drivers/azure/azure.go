@@ -380,6 +380,34 @@ func (d *impl) SignedURL(_ context.Context, key string, expires time.Duration) (
 	return fmt.Sprintf("%s/%s/%s?%s", endpoint, url.PathEscape(d.container), strings.Join(parts, "/"), queryParams.Encode()), nil
 }
 
+func (d *impl) SignedPutURL(_ context.Context, key string, expires time.Duration) (string, error) {
+	if d.sharedKey == nil {
+		return "", fmt.Errorf("%w: azure SAS requires shared-key credentials (set STORAGE_DISK_<NAME>_ACCESS_KEY + _SECRET_KEY)", stordriver.ErrNotSupported)
+	}
+	expires = clampTTL(expires)
+	k, err := cleanKey(key)
+	if err != nil {
+		return "", err
+	}
+	sasValues := sas.BlobSignatureValues{
+		Protocol:      sas.ProtocolHTTPS,
+		ExpiryTime:    time.Now().UTC().Add(expires),
+		ContainerName: d.container,
+		BlobName:      k,
+		Permissions:   (&sas.BlobPermissions{Write: true, Create: true}).String(),
+	}
+	queryParams, err := sasValues.SignWithSharedKey(d.sharedKey)
+	if err != nil {
+		return "", fmt.Errorf("azure: sign upload SAS %q: %w", key, err)
+	}
+	endpoint := strings.TrimRight(d.client.URL(), "/")
+	parts := strings.Split(k, "/")
+	for i, p := range parts {
+		parts[i] = url.PathEscape(p)
+	}
+	return fmt.Sprintf("%s/%s/%s?%s", endpoint, url.PathEscape(d.container), strings.Join(parts, "/"), queryParams.Encode()), nil
+}
+
 func (d *impl) Shutdown(_ context.Context) error {
 	d.shutdownOnce.Do(func() {})
 	return nil

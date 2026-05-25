@@ -157,6 +157,10 @@ func (p *fakePresigner) PresignGetObject(_ context.Context, in *s3.GetObjectInpu
 	return &s3core.PresignedRequest{URL: p.baseURL + "/" + *in.Bucket + "/" + *in.Key + "?X-Amz-Expires=900"}, nil
 }
 
+func (p *fakePresigner) PresignPutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*s3.PresignOptions)) (*s3core.PresignedRequest, error) {
+	return &s3core.PresignedRequest{URL: p.baseURL + "/" + *in.Bucket + "/" + *in.Key + "?X-Amz-Expires=900&method=PUT"}, nil
+}
+
 // ── tests ────────────────────────────────────────────────────────────
 
 func newDriver(t *testing.T, opts ...func(*stordriver.Spec)) (stordriver.Driver, *fakeAPI) {
@@ -362,6 +366,17 @@ func TestS3Core_SignedURLDefaultExpiry(t *testing.T) {
 	}
 	if !strings.HasPrefix(u, "https://signed.example.com/test-bucket/secret.bin") {
 		t.Fatalf("signed URL = %q", u)
+	}
+}
+
+func TestS3Core_SignedPutURLDefaultExpiry(t *testing.T) {
+	d, _ := newDriver(t)
+	u, err := d.SignedPutURL(context.Background(), "upload.bin", 0)
+	if err != nil {
+		t.Fatalf("signed put: %v", err)
+	}
+	if !strings.Contains(u, "test-bucket/upload.bin") {
+		t.Fatalf("signed put URL = %q", u)
 	}
 }
 

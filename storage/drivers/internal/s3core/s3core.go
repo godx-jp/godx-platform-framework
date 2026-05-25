@@ -66,10 +66,12 @@ type API interface {
 	ListObjectsV2(ctx context.Context, in *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 }
 
-// Presigner is the subset of s3.PresignClient surfaced for SignedURL.
-// Heavy clients can implement an empty stub; tests can supply a fake.
+// Presigner is the subset of s3.PresignClient surfaced for SignedURL and
+// SignedPutURL. Heavy clients can implement an empty stub; tests can
+// supply a fake.
 type Presigner interface {
 	PresignGetObject(ctx context.Context, in *s3.GetObjectInput, optFns ...func(*s3.PresignOptions)) (*PresignedRequest, error)
+	PresignPutObject(ctx context.Context, in *s3.PutObjectInput, optFns ...func(*s3.PresignOptions)) (*PresignedRequest, error)
 }
 
 // PresignedRequest mirrors v4.PresignedHTTPRequest at a narrower
@@ -419,6 +421,27 @@ func (d *impl) SignedURL(ctx context.Context, key string, expires time.Duration)
 	return req.URL, nil
 }
 
+func (d *impl) SignedPutURL(ctx context.Context, key string, expires time.Duration) (string, error) {
+	if d.presigner == nil {
+		return "", fmt.Errorf("%w: presigner not configured", stordriver.ErrNotSupported)
+	}
+	expires = clampTTL(expires)
+	k, err := cleanKey(key)
+	if err != nil {
+		return "", err
+	}
+	req, err := d.presigner.PresignPutObject(ctx, &s3.PutObjectInput{
+		Bucket: &d.bucket,
+		Key:    &k,
+	}, func(o *s3.PresignOptions) {
+		o.Expires = expires
+	})
+	if err != nil {
+		return "", translateError(err, key)
+	}
+	return req.URL, nil
+}
+
 func (d *impl) Shutdown(_ context.Context) error {
 	d.shutdownOnce.Do(func() {})
 	return nil
@@ -521,6 +544,14 @@ type awsPresigner struct{ c *s3.PresignClient }
 
 func (a *awsPresigner) PresignGetObject(ctx context.Context, in *s3.GetObjectInput, optFns ...func(*s3.PresignOptions)) (*PresignedRequest, error) {
 	req, err := a.c.PresignGetObject(ctx, in, optFns...)
+	if err != nil {
+		return nil, err
+	}
+	return &PresignedRequest{URL: req.URL}, nil
+}
+
+func (a *awsPresigner) PresignPutObject(ctx context.Context, in *s3.PutObjectInput, optFns ...func(*s3.PresignOptions)) (*PresignedRequest, error) {
+	req, err := a.c.PresignPutObject(ctx, in, optFns...)
 	if err != nil {
 		return nil, err
 	}

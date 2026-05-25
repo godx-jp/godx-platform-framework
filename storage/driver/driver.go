@@ -62,6 +62,10 @@ type Driver interface {
 	// without signed-URL support must return ErrNotSupported.
 	SignedURL(ctx context.Context, key string, expires time.Duration) (string, error)
 
+	// SignedPutURL returns a time-limited URL granting write (PUT) access.
+	// Drivers without presigned-upload support must return ErrNotSupported.
+	SignedPutURL(ctx context.Context, key string, expires time.Duration) (string, error)
+
 	// Shutdown releases resources held by the driver. It MUST be safe to
 	// call more than once.
 	Shutdown(ctx context.Context) error

@@ -204,4 +204,29 @@ func TestDisk_URLAndTemporaryURLOnMemoryReturnNotSupported(t *testing.T) {
 	if _, err := d.TemporaryURL(context.Background(), "x", 0); !errors.Is(err, driver.ErrNotSupported) {
 		t.Fatalf("TemporaryURL: %v", err)
 	}
+	if _, err := d.TemporaryUploadURL(context.Background(), "x", 0); !errors.Is(err, driver.ErrNotSupported) {
+		t.Fatalf("TemporaryUploadURL: %v", err)
+	}
+}
+
+func TestDisk_DeletePrefix(t *testing.T) {
+	_, d := newAppWithMemoryDisk(t)
+	ctx := context.Background()
+	for _, k := range []string{"a/1.txt", "a/b/2.txt", "c.txt"} {
+		if err := d.Put(ctx, k, []byte("x")); err != nil {
+			t.Fatalf("put %q: %v", k, err)
+		}
+	}
+	if err := d.DeletePrefix(ctx, "a/"); err != nil {
+		t.Fatalf("delete prefix: %v", err)
+	}
+	if ok, _ := d.Exists(ctx, "a/1.txt"); ok {
+		t.Fatal("a/1.txt should be deleted")
+	}
+	if ok, _ := d.Exists(ctx, "a/b/2.txt"); ok {
+		t.Fatal("a/b/2.txt should be deleted")
+	}
+	if ok, _ := d.Exists(ctx, "c.txt"); !ok {
+		t.Fatal("c.txt should remain")
+	}
 }

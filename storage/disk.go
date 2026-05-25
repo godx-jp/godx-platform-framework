@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/godx-jp/godx-platform-framework/storage/driver"
@@ -240,6 +241,67 @@ func (d *Disk) URL(path string) (string, error) {
 // driver.ErrNotSupported.
 func (d *Disk) TemporaryURL(ctx context.Context, path string, expires time.Duration) (string, error) {
 	return d.driver.SignedURL(ctx, path, expires)
+}
+
+// PresignedUpload holds a time-limited upload URL and metadata.
+type PresignedUpload struct {
+	ObjectKey string
+	UploadURL string
+	ExpiresAt time.Time
+}
+
+// TemporaryUploadURL returns a signed URL granting write (PUT) access for
+// expires duration. Drivers without presigned-upload support return
+// driver.ErrNotSupported.
+func (d *Disk) TemporaryUploadURL(ctx context.Context, path string, expires time.Duration) (PresignedUpload, error) {
+	if expires <= 0 {
+		expires = 15 * time.Minute
+	}
+	u, err := d.driver.SignedPutURL(ctx, path, expires)
+	if err != nil {
+		return PresignedUpload{}, err
+	}
+	return PresignedUpload{
+		ObjectKey: path,
+		UploadURL: u,
+		ExpiresAt: time.Now().Add(expires),
+	}, nil
+}
+
+// DeletePrefix removes every object whose key is under prefix (recursive).
+// Missing prefixes are not an error.
+func (d *Disk) DeletePrefix(ctx context.Context, prefix string) error {
+	dir := strings.TrimPrefix(strings.TrimSpace(prefix), "/")
+	return d.deletePrefixRecursive(ctx, dir)
+}
+
+func (d *Disk) deletePrefixRecursive(ctx context.Context, dir string) error {
+	entries, err := d.driver.List(ctx, dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir {
+			if err := d.deletePrefixRecursive(ctx, e.Key); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := d.driver.Delete(ctx, e.Key); err != nil && !errors.Is(err, driver.ErrNotFound) {
+			return fmt.Errorf("storage: delete %q: %w", e.Key, err)
+		}
+	}
+	return nil
+}
+
+// BuildDisk constructs a Disk from DiskConfig without going through the
+// module. Useful for TBK services that map flat env vars to a single
+// named disk at startup.
+func BuildDisk(ctx context.Context, name string, cfg DiskConfig) (*Disk, error) {
+	if err := cfg.Validate(name); err != nil {
+		return nil, err
+	}
+	return buildDisk(ctx, name, cfg)
 }
 
 // Prepend writes content to the start of path, preserving any existing

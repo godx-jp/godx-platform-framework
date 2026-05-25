@@ -60,6 +60,13 @@ func initFromConfig(ctx context.Context, app *framework.App, cfg Config) error {
 	return nil
 }
 
+// BuildStore constructs a Store from StoreConfig without going through
+// the module. Useful for TBK services that map flat env vars to a single
+// named store at startup.
+func BuildStore(ctx context.Context, name, globalPrefix string, sc StoreConfig) (*Store, error) {
+	return buildStore(ctx, name, globalPrefix, sc)
+}
+
 func buildStore(ctx context.Context, name, globalPrefix string, sc StoreConfig) (*Store, error) {
 	spec := cdriver.Spec{
 		Name:       sc.Driver,

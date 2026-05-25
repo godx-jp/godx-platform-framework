@@ -239,6 +239,10 @@ func (d *impl) SignedURL(_ context.Context, _ string, _ time.Duration) (string, 
 	return "", fmt.Errorf("%w: memory driver cannot sign URLs", driver.ErrNotSupported)
 }
 
+func (d *impl) SignedPutURL(_ context.Context, _ string, _ time.Duration) (string, error) {
+	return "", fmt.Errorf("%w: memory driver cannot sign upload URLs", driver.ErrNotSupported)
+}
+
 func (d *impl) Shutdown(_ context.Context) error {
 	d.mu.Lock()
 	d.objects = map[string]*object{}

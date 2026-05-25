@@ -296,6 +296,24 @@ func (d *impl) SignedURL(_ context.Context, key string, expires time.Duration) (
 	return signed, nil
 }
 
+func (d *impl) SignedPutURL(_ context.Context, key string, expires time.Duration) (string, error) {
+	expires = clampTTL(expires)
+	k, err := cleanKey(key)
+	if err != nil {
+		return "", err
+	}
+	signed, err := d.client.Bucket(d.bucket).SignedURL(k, &gcs.SignedURLOptions{
+		Method:  "PUT",
+		Expires: time.Now().Add(expires),
+		Scheme:  gcs.SigningSchemeV4,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: gcs.SignedPutURL %q (requires a service-account JSON key — metadata-server creds cannot sign locally): %v",
+			stordriver.ErrNotSupported, key, err)
+	}
+	return signed, nil
+}
+
 func (d *impl) Shutdown(_ context.Context) error {
 	return d.client.Close()
 }
