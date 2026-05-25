@@ -150,6 +150,8 @@ The `smtp` driver guards against SMTP header / CRLF injection before it ever dia
 
 A message that fails validation never reaches the wire; `Send` returns a descriptive error (wrapping the sentinel `smtp.ErrHeaderInjection` for control-character cases) instead of smuggling extra headers such as `Bcc:` or a forged `Content-Type`.
 
+The `log` transport **does not emit the full message body by default**. It logs the recipient, subject, body length (`body_bytes`), and a short truncated `body_preview`, so secrets in the body — reset links, tokens, OTPs — are not leaked to logs if the transport is ever selected outside dev. Full-body logging is available only by explicitly constructing the transport with `log.NewWithBody`, and should be used only in trusted dev environments.
+
 ## Context propagation
 
 `mail.ContextWithManager(ctx, mgr)` attaches a manager to a context; `mail.FromContext(ctx)` retrieves it. `Send` also looks up an `events.Bus` from the context when the manager has none. `mail.FromApp(app)` is the canonical way to retrieve the manager built by `mail.Module`.
