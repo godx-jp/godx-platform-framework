@@ -4,6 +4,29 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-05-25
+
+Ships the `encryption/` module — authenticated symmetric encryption with versioned key rotation. Fourth release in the Laravel-parity reshuffle.
+
+### Added
+
+- **`encryption/` module** — `Encrypter` wraps a `Cipher` + versioned key ring. Encoded tokens are `v1:<key-id>:<base64-url(nonce|ciphertext|tag)>` so `Decrypt` resolves the right key from the ring without metadata. `Encrypt / Decrypt` on raw bytes; `EncryptString / DecryptString` convenience.
+- **`encryption/driver/`** — `Cipher` interface with `Name / KeySize / Encrypt / Decrypt`. `Spec` carries driver-specific tunables. Sentinel errors `ErrAuthFailed`, `ErrInvalidKeySize`, `ErrShortCiphertext`, `ErrInvalidToken`, `ErrUnknownKey`. Registry mirrors the cache/config/hashing shape.
+- **`drivers/aesgcm`** — AES-256-GCM (Laravel default). 32-byte key, 12-byte random nonce per call. Stateless; one driver instance serves many keys.
+- **`drivers/chacha20poly1305`** — ChaCha20-Poly1305 (`golang.org/x/crypto`). 32-byte key. Faster than AES on platforms without AES-NI.
+- **Key rotation** — `AddKey(id, key)` registers a new key; `SetPrimary(id)` flips encryption to it. Old tokens still decrypt under prior keys. `KeyIDOf(token)` exposes the embedded id for sweep tooling.
+- **`encryption.Module`** — env-driven (`ENCRYPTION_DRIVER`, `ENCRYPTION_KEY`, `ENCRYPTION_PRIMARY_KEY_ID`, `ENCRYPTION_PREVIOUS_KEYS`). `ModuleWithConfig` for code-driven wiring. `MustNew(keyEncoded)` for tests/scripts.
+- **`ParseKey`** — accepts `base64:<…>` (Laravel APP_KEY style), `hex:<…>`, or raw bytes.
+- **`examples/encryption/main.go`** — generates a demo key if none supplied; shows token + KeyIDOf round trip.
+- **`docs/modules/encryption.md`** — full reference: token format, rotation strategy (deploy-time and runtime), drivers, env vars, security notes, Laravel API mapping, Migrating from go-common.
+
+### Tests
+
+- **`encryption/conformance_test.go`** — driver-agnostic AEAD suite: round trip, nonce randomness, wrong-key failure (`ErrAuthFailed`), tampered-ciphertext failure, too-short input rejection, wrong-key-size rejection. Runs against both `aesgcm` and `chacha20poly1305`.
+- **`encryption/encrypter_test.go`** — token format, key rotation with old tokens still decrypting, invalid-token taxonomy (missing colons, wrong version, empty id, bad base64), unknown-key-id forging, no-primary error, AddKey rejection (empty id / wrong size / duplicate), SetPrimary unknown, PrimaryKeyID + KeyIDs reflect state, concurrent Encrypt+Decrypt safe, `ParseKey` format handling, `KeyIDOf` invalid token.
+- **`encryption/module_test.go`** — env-driven init, previous-keys loading, missing key fails Init, malformed previous-key entry rejected, context helpers, `MustNew` produces a working Encrypter.
+- **`encryption/driver/registry_test.go`** — Register / Lookup / Names / New round trip, empty-name + nil-constructor panics, sentinel errors distinct under `errors.Is`.
+
 ## [0.8.2] — 2026-05-25
 
 Ships the `hashing/` module — Laravel's `Hash` facade with three modern drivers, self-describing encoded output, and explicit `NeedsRehash` semantics for safe work-factor upgrades. Third release in the Laravel-parity reshuffle.
