@@ -10,8 +10,9 @@ import (
 	"strings"
 	"sync"
 
-	ndriver "github.com/godx-jp/godx-platform-framework/notifications/driver"
 	"github.com/godx-jp/godx-platform-framework/notifications/contract"
+	ndriver "github.com/godx-jp/godx-platform-framework/notifications/driver"
+	"github.com/godx-jp/godx-platform-framework/notifications/internal/urlguard"
 )
 
 func init() {
@@ -60,6 +61,13 @@ func (c *channel) Send(ctx context.Context, notifiable, notification any) error 
 	}
 	if url == "" {
 		return fmt.Errorf("notifications/webhook: URL is required")
+	}
+	// SECURITY: destination URL is attacker-influenced; validate against the
+	// SSRF policy before issuing any request. Redirects are not followed by
+	// the injected client; if that changes, the redirect target must be
+	// re-validated via urlguard.Validate.
+	if _, err := urlguard.Validate(url); err != nil {
+		return fmt.Errorf("notifications/webhook: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(msg.Body))
 	if err != nil {

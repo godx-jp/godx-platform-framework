@@ -145,3 +145,12 @@ Payload includes `channel`, `driver`, and `error` (on failure). Events fire only
 ## Lifecycle
 
 `notifications.Module` publishes the `*Manager` on the framework `App` under store key `godx.notifications.manager` and registers an `OnShutdown` callback that calls `Manager.Shutdown`, shutting down every channel. Retrieve the manager with `notifications.FromApp(app)`.
+
+## Security: SSRF protection
+
+The `webhook`, `slack` and `discord` channels post to a destination URL that may be supplied at runtime (per-notification message, or the notifiable's `RouteNotificationFor`). Because that URL is attacker-influenced, every destination is validated against an SSRF allow/deny policy **before** any request is issued:
+
+- Only `http` and `https` schemes are permitted (`http` is allowed for on-prem Slack/webhook endpoints). Everything else — `file:`, `gopher:`, `ftp:`, … — is rejected.
+- The host is checked as a literal IP, and otherwise resolved via DNS; the request is blocked if any resolved address falls in a private, loopback, link-local, unique-local or unspecified range. This includes `127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16` (the AWS/GCP **metadata IP** `169.254.169.254`), `::1`, `fc00::/7`, `fe80::/10`, `0.0.0.0`, and IPv4-mapped equivalents.
+
+A blocked destination returns an error wrapping `ErrBlockedURL` and **no HTTP request is sent**. The injected HTTP client does not follow redirects for these channels; if redirect-following is ever enabled, the redirect target must be re-validated, since a `30x` to an internal host would otherwise bypass the check.

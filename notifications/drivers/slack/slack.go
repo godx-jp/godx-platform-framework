@@ -11,8 +11,9 @@ import (
 	"strings"
 	"sync"
 
-	ndriver "github.com/godx-jp/godx-platform-framework/notifications/driver"
 	"github.com/godx-jp/godx-platform-framework/notifications/contract"
+	ndriver "github.com/godx-jp/godx-platform-framework/notifications/driver"
+	"github.com/godx-jp/godx-platform-framework/notifications/internal/urlguard"
 )
 
 func init() {
@@ -62,6 +63,13 @@ func (c *channel) Send(ctx context.Context, notifiable, notification any) error 
 	}
 	if url == "" {
 		return fmt.Errorf("notifications/slack: webhook URL is required")
+	}
+	// SECURITY: webhook URL is attacker-influenced; validate against the
+	// SSRF policy before issuing any request. Redirects are not followed by
+	// the injected client; if that changes, the redirect target must be
+	// re-validated via urlguard.Validate.
+	if _, err := urlguard.Validate(url); err != nil {
+		return fmt.Errorf("notifications/slack: %w", err)
 	}
 	body, err := json.Marshal(map[string]string{"text": msg.Text})
 	if err != nil {
