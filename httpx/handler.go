@@ -50,9 +50,26 @@ func WrapStatus(code int, message string, err error) *StatusError {
 func Serve(h HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := h(w, r); err != nil {
+			// Notify the process-global observer (if set) with the status that
+			// writeError will use, BEFORE writing the response, passing the
+			// request context so the observer can record on the active span.
+			if obs := errorObserver; obs != nil {
+				obs(r.Context(), err, statusOf(err))
+			}
 			writeError(w, err)
 		}
 	}
+}
+
+// statusOf returns the HTTP status writeError will write for err: the
+// *StatusError code when it is > 0, otherwise http.StatusInternalServerError.
+// writeError is defined in terms of statusOf so the two never diverge.
+func statusOf(err error) int {
+	var se *StatusError
+	if errors.As(err, &se) && se.Code > 0 {
+		return se.Code
+	}
+	return http.StatusInternalServerError
 }
 
 func writeError(w http.ResponseWriter, err error) {

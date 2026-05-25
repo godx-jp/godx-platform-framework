@@ -125,6 +125,38 @@ func createUser(w http.ResponseWriter, r *http.Request) error {
 }
 ```
 
+## Error observability
+
+By default, an error returned to `Serve` writes a response but is invisible to logs, traces, and metrics — the Go `error` value (its message and wrap chain) is discarded. Install a process-global `ErrorObserver` to make the error path observable **without** `httpx` taking a hard dependency on `observability`: the observer is a plain func value the caller wires up.
+
+```go
+// ErrorObserver is notified of every non-nil error returned by a HandlerFunc,
+// with the HTTP status that will be written, BEFORE the response is sent. Set
+// once at startup. nil (default) preserves today's behavior. Implementations
+// must not write to the response.
+type ErrorObserver func(ctx context.Context, err error, status int)
+
+func SetErrorObserver(fn ErrorObserver) // process-global, set once at startup
+```
+
+When the handler returns a non-nil error, `Serve` computes the status it is about to write (via the same logic `writeError` uses), invokes the observer with `(r.Context(), err, status)` **before** writing the response, then writes the response. Passing the request context lets the observer record the error on the active span (e.g. `span.RecordError`, set `error.type`) or bump an error counter.
+
+- `SetErrorObserver` mirrors `SetProblemTypeBaseURL` / `SetRequestIDExtractor`: call it once at startup, before serving traffic. Passing `nil` restores the default (no-op) behavior.
+- The observer **must not** write to the response — `writeError` owns the response. It runs on the request goroutine, before the response is sent.
+- The status passed is exactly what will be written: a `*StatusError` `Code` when `> 0`, otherwise `500`.
+
+This is the bridge between `httpx` and the observability stack: a service wires its `observability.Provider` into an observer at startup, and `httpx` stays decoupled from `observability`.
+
+```go
+httpx.SetErrorObserver(func(ctx context.Context, err error, status int) {
+    span := trace.SpanFromContext(ctx)
+    span.RecordError(err)
+    if status >= 500 {
+        span.SetStatus(codes.Error, err.Error())
+    }
+})
+```
+
 ## RFC 9457 Problem Details
 
 For APIs that expose a structured error envelope, configure the type URI prefix once at startup, then call `WriteProblem`:
@@ -141,6 +173,21 @@ httpx.WriteProblem(w, r, "orders", http.StatusUnprocessableEntity, "validation-f
 When `SetProblemTypeBaseURL` is not called, `TypeURI` falls back to `urn:problem:{service}:{slug}`.
 
 Mount Swagger UI before auth middleware: `httpx.MountOpenAPI(r, httpx.OpenAPIConfig{Title: "Orders API", Spec: specBytes})`.
+
+## Instrumented router
+
+For the common case, `observability/middleware.InstrumentedRouter(p *observability.Provider) *chi.Mux` returns a `chi.Mux` pre-wired with the correct observability defaults so a service does not hand-wire the stack:
+
+```go
+import "github.com/godx-jp/godx-platform-framework/observability/middleware"
+
+r := middleware.InstrumentedRouter(obs) // request-id · HTTP(obs) · Recoverer
+httpx.Route(r, http.MethodGet, "/ping", ping)
+```
+
+The middleware order is outermost-first: `RequestID` → `HTTP(p)` → `Recoverer`. `HTTP(p)` (the Phase-1 tracing + RED metrics + severity-mapped logging middleware) wraps `Recoverer` so a recovered panic's `500` status is observed — logged at `ERROR`, counted, and recorded on the span — rather than escaping the instrumentation. chi's `RealIP` is **not** enabled (spoofable; opt in only behind a trusted proxy — see the `RealIP` security note above).
+
+Pair it with `SetErrorObserver` (see [Error observability](#error-observability)) so handler-returned errors are recorded on the active span the `HTTP` middleware started.
 
 ## Recommended middleware stack
 
