@@ -19,15 +19,18 @@ obs.Logger().InfoContext(ctx, "started", "port", 8080)
 ctx, span := obs.Tracer().Start(ctx, "operation-name")
 counter, _ := obs.Meter().Int64Counter("requests_total")
 counter.Add(ctx, 1)
+
+// Inspect which driver is active (useful for liveness probes / debug pages).
+fmt.Println("driver:", obs.Driver())
 ```
 
 ## What it gives you
 
-| Signal | API | Wire format |
-|--------|-----|-------------|
-| Logs | `obs.Logger()` → `*slog.Logger` | JSON to stdout (collected out-of-process) |
-| Traces | `obs.Tracer()` → `trace.Tracer` | OTLP gRPC/HTTP (selected backend) |
-| Metrics | `obs.Meter()` → `metric.Meter` | OTLP gRPC/HTTP (selected backend) |
+| Signal | API | Wire format (depends on driver) |
+|--------|-----|---------------------------------|
+| Logs | `obs.Logger()` → `*slog.Logger` | JSON to stdout, or local file (`file` driver), or OTLP-correlated container-log workflow (`otlp` driver) |
+| Traces | `obs.Tracer()` → `trace.Tracer` | OTLP gRPC/HTTP (`otlp` driver) or in-process (`stdout` / `file` drivers) |
+| Metrics | `obs.Meter()` → `metric.Meter` | OTLP gRPC/HTTP (`otlp` driver) or no-op (`stdout` / `file` drivers) |
 | HTTP middleware | `obs.Middleware(handler)` | Adds span + correlation ID + per-request log |
 
 ## Auto-injected log attributes
@@ -103,4 +106,4 @@ Useful for one-shot scripts or CLIs that don't want a long-running `App`.
 
 - The `contextHandler` wrap costs one map allocation per log record (for the attributes). Negligible for typical workloads.
 - OTLP exporters batch by default (5 s window, 512 record max). No-op when the queue is full to avoid blocking application code.
-- The stdout backend is synchronous and unbatched — fine for dev, not for hot prod paths.
+- The stdout and file drivers are synchronous and unbatched — fine for dev / moderate prod traffic, not for hot paths emitting thousands of log lines per second.

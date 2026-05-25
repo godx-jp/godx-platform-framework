@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 
-	"github.com/godx-jp/godx-platform-framework/observability/backends"
+	"github.com/godx-jp/godx-platform-framework/observability/drivers"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -15,11 +15,11 @@ import (
 // Provider holds the live observability handles for a service. Obtain one via
 // the framework module ([Module]) or directly with [NewProvider].
 type Provider struct {
-	cfg     Config
-	backend backends.Backend
-	logger  *slog.Logger
-	tracer  trace.Tracer
-	meter   metric.Meter
+	cfg    Config
+	driver drivers.Driver
+	logger *slog.Logger
+	tracer trace.Tracer
+	meter  metric.Meter
 }
 
 // NewProvider constructs a provider for the given config. Most callers should
@@ -30,53 +30,53 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 		return nil, err
 	}
 
-	be, err := backends.New(ctx, backends.Spec{
-		Name:            cfg.Backend,
-		ServiceName:     cfg.ServiceName,
-		ServiceVersion:  cfg.ServiceVersion,
-		Environment:     cfg.Environment,
-		LogLevel:        cfg.LogLevel,
-		TraceSampleRate: cfg.TraceSampleRate,
-		OTLPEndpoint:    cfg.OTLPEndpoint,
-		OTLPProtocol:    cfg.OTLPProtocol,
-		OTLPInsecure:    cfg.OTLPInsecure,
-		AWSRegion:       cfg.AWSRegion,
-		LogGroupName:    cfg.LogGroupName,
-		FilePath:        cfg.FilePath,
-		FileRotate:      cfg.FileRotate,
-		FileMaxSizeMB:   cfg.FileMaxSizeMB,
-		FileMaxAgeDays:  cfg.FileMaxAgeDays,
-		FileMaxBackups:  cfg.FileMaxBackups,
-		FileCompress:    cfg.FileCompress,
+	d, err := drivers.New(ctx, drivers.Spec{
+		Name:               cfg.Driver,
+		ServiceName:        cfg.ServiceName,
+		ServiceVersion:     cfg.ServiceVersion,
+		Environment:        cfg.Environment,
+		LogLevel:           cfg.LogLevel,
+		TraceSampleRate:    cfg.TraceSampleRate,
+		OTLPEndpoint:       cfg.OTLPEndpoint,
+		OTLPProtocol:       cfg.OTLPProtocol,
+		OTLPInsecure:       cfg.OTLPInsecure,
+		AWSRegion:          cfg.AWSRegion,
+		CloudWatchLogGroup: cfg.CloudWatchLogGroup,
+		LogFilePath:        cfg.LogFilePath,
+		LogFileRotation:    cfg.LogFileRotation,
+		LogFileMaxSizeMB:   cfg.LogFileMaxSizeMB,
+		LogFileMaxAgeDays:  cfg.LogFileMaxAgeDays,
+		LogFileMaxBackups:  cfg.LogFileMaxBackups,
+		LogFileCompress:    cfg.LogFileCompress,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("observability: backend %q: %w", cfg.Backend, err)
+		return nil, fmt.Errorf("observability: driver %q: %w", cfg.Driver, err)
 	}
 
 	// Wrap the slog handler so trace_id / correlation_id are injected
 	// automatically from context.
-	logger := slog.New(&contextHandler{inner: be.LoggerHandler()}).With(
+	logger := slog.New(&contextHandler{inner: d.LoggerHandler()}).With(
 		slog.String("service", cfg.ServiceName),
 		slog.String("version", cfg.ServiceVersion),
 		slog.String("env", cfg.Environment),
 	)
 
-	otel.SetTracerProvider(be.TracerProvider())
-	otel.SetMeterProvider(be.MeterProvider())
+	otel.SetTracerProvider(d.TracerProvider())
+	otel.SetMeterProvider(d.MeterProvider())
 
 	p := &Provider{
-		cfg:     cfg,
-		backend: be,
-		logger:  logger,
-		tracer:  be.TracerProvider().Tracer(cfg.ServiceName),
-		meter:   be.MeterProvider().Meter(cfg.ServiceName),
+		cfg:    cfg,
+		driver: d,
+		logger: logger,
+		tracer: d.TracerProvider().Tracer(cfg.ServiceName),
+		meter:  d.MeterProvider().Meter(cfg.ServiceName),
 	}
 	setGlobalProvider(p)
 	return p, nil
 }
 
-// Backend reports the active backend driver name (e.g. "otlp").
-func (p *Provider) Backend() string { return p.cfg.Backend }
+// Driver reports the active driver name (e.g. "otlp").
+func (p *Provider) Driver() string { return p.cfg.Driver }
 
 // Logger returns the contextual slog logger. Pre-decorated with service
 // identity; trace_id / correlation_id are injected on each Handle call.
@@ -88,10 +88,10 @@ func (p *Provider) Tracer() trace.Tracer { return p.tracer }
 // Meter returns the OTel meter scoped to the service name.
 func (p *Provider) Meter() metric.Meter { return p.meter }
 
-// Shutdown flushes pending telemetry and tears the backend down.
+// Shutdown flushes pending telemetry and tears the driver down.
 func (p *Provider) Shutdown(ctx context.Context) error {
 	clearGlobalProvider(p)
-	return p.backend.Shutdown(ctx)
+	return p.driver.Shutdown(ctx)
 }
 
 // --- contextHandler injects trace + correlation IDs into every log record.
@@ -145,7 +145,7 @@ var fallback = func() *Provider {
 		ServiceName:    "noop",
 		ServiceVersion: "0.0.0",
 		Environment:    "dev",
-		Backend:        BackendStdout,
+		Driver:         DriverStdout,
 		LogLevel:       slog.LevelInfo,
 	}
 	p, _ := NewProvider(context.Background(), cfg)

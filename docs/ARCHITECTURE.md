@@ -7,8 +7,9 @@ godx-platform-framework is intentionally small — a backbone for modules, not a
 1. **Composition over configuration.** No magic, no DI graph reflection. `app.Use(module)` and `module.Init(ctx, app)` are the only contracts.
 2. **Modules are pluggable, the backbone is not.** Adding a feature means adding a module; you never patch the core.
 3. **Wire-format-first.** Telemetry is shipped via OpenTelemetry (OTLP) wherever possible — never a vendor SDK in user code.
-4. **Driver pattern for backends.** Selecting Loki/Tempo vs CloudWatch vs Datadog is a config decision, not a code change.
+4. **Driver pattern for destinations.** Selecting Loki/Tempo vs CloudWatch vs Datadog vs local-file is a config decision, not a code change.
 5. **Stdlib-first.** Where the stdlib is sufficient (`log/slog`, `net/http`), we wrap it; we do not replace it.
+6. **No abbreviations in env vars.** Every variable starts with the namespace spelled out (`OBSERVABILITY_*`) unless it is a documented industry standard (`OTEL_*`, `AWS_*`, `DEPLOYMENT_ENVIRONMENT`).
 
 ## Layered model
 
@@ -29,8 +30,8 @@ godx-platform-framework is intentionally small — a backbone for modules, not a
 │  │  │                  │ uses                           │  │  │
 │  │  │                  ▼                                │  │  │
 │  │  │  ┌────────────────────────────────────────────┐  │  │  │
-│  │  │  │  backends.Backend (driver)                 │  │  │  │
-│  │  │  │  stdout · otlp · cloudwatch (stub)         │  │  │  │
+│  │  │  │  drivers.Driver                            │  │  │  │
+│  │  │  │  stdout · file · otlp · cloudwatch (stub)  │  │  │  │
 │  │  │  └────────────────────────────────────────────┘  │  │  │
 │  │  └──────────────────────────────────────────────────┘  │  │
 │  │  (future) httpx · dbx · cachex · queuex · eventbus     │  │
@@ -80,7 +81,7 @@ app.Shutdown(ctx)
               │ observability.     │
               │   Provider         │
               └─────────┬──────────┘
-                        │ Backend interface
+                        │ Driver interface
                         ▼
   ┌──────────┬───────────────┬────────────┬───────────────┐
   │ stdout   │ file          │ otlp       │ cloudwatch    │
@@ -88,10 +89,10 @@ app.Shutdown(ctx)
   │  k8s)    │  style local) │  Datadog…) │               │
   └──────────┴───────────────┴────────────┴───────────────┘
 
-   selected by:  OBS_BACKEND=stdout|file|otlp|cloudwatch
+   selected by:  OBSERVABILITY_DRIVER=stdout|file|otlp|cloudwatch
 ```
 
-The application **never** imports an exporter or a vendor SDK. Swapping backends is a deployment configuration change, not a recompile.
+The application **never** imports an exporter or a vendor SDK. Swapping the driver is a deployment configuration change, not a recompile.
 
 ## Why a separate "framework" repo
 
@@ -109,9 +110,9 @@ The application **never** imports an exporter or a vendor SDK. Swapping backends
 
 | Version | Modules added |
 |---------|---------------|
-| 0.1.x | `framework`, `observability` (stdout / file / otlp + cloudwatch stub) |
-| 0.2.x | `httpx` (chi router + handlers), stack/multi-backend log driver |
-| 0.3.x | `observability` cloudwatch driver (AWS ADOT) |
+| 0.1.x | initial scaffold (deprecated naming) |
+| 0.2.x | env-var rename to full `OBSERVABILITY_*`, `Backend` → `Driver` (this release) |
+| 0.3.x | `observability` cloudwatch driver (AWS ADOT), configurable correlation header, `httpx` (chi router + handlers) |
 | 0.4.x | `dbx` (sqlc + outbox), `cachex` |
 | 0.5.x | `queuex`, `eventbus` |
 | 1.0.0 | API freeze; semver guarantees for `1.x` |

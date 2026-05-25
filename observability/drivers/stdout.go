@@ -1,4 +1,4 @@
-package backends
+package drivers
 
 import (
 	"context"
@@ -14,27 +14,27 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// stdoutBackend writes structured JSON logs to stdout and uses a no-op meter
+// stdoutDriver writes structured JSON logs to stdout and uses a no-op meter
 // + an in-process tracer (always-sample). Suitable for development and unit
 // tests where no external collector is reachable.
-type stdoutBackend struct {
+type stdoutDriver struct {
 	handler slog.Handler
 	tp      *sdktrace.TracerProvider
 }
 
-func newStdout(s Spec) *stdoutBackend {
+func newStdout(s Spec) *stdoutDriver {
 	h := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: s.LogLevel})
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(samplerFor(s.TraceSampleRate)),
 		sdktrace.WithResource(resourceFor(s)),
 	)
-	return &stdoutBackend{handler: h, tp: tp}
+	return &stdoutDriver{handler: h, tp: tp}
 }
 
-func (b *stdoutBackend) LoggerHandler() slog.Handler          { return b.handler }
-func (b *stdoutBackend) TracerProvider() trace.TracerProvider { return b.tp }
-func (b *stdoutBackend) MeterProvider() metric.MeterProvider  { return metricnoop.NewMeterProvider() }
-func (b *stdoutBackend) Shutdown(ctx context.Context) error   { return b.tp.Shutdown(ctx) }
+func (d *stdoutDriver) LoggerHandler() slog.Handler          { return d.handler }
+func (d *stdoutDriver) TracerProvider() trace.TracerProvider { return d.tp }
+func (d *stdoutDriver) MeterProvider() metric.MeterProvider  { return metricnoop.NewMeterProvider() }
+func (d *stdoutDriver) Shutdown(ctx context.Context) error   { return d.tp.Shutdown(ctx) }
 
 func samplerFor(rate float64) sdktrace.Sampler {
 	if rate <= 0 || rate >= 1 {

@@ -3,7 +3,7 @@
 //
 // Run:
 //
-//	OBS_BACKEND=stdout go run .
+//	OBSERVABILITY_DRIVER=stdout go run .
 package main
 
 import (
@@ -34,7 +34,7 @@ func main() {
 	defer span.End()
 
 	obs.Logger().InfoContext(ctx, "hello from godx-platform-framework",
-		"backend", obs.Backend(),
+		"driver", obs.Driver(),
 		"hint", "trace_id is auto-injected",
 	)
 }

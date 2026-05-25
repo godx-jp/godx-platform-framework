@@ -1,4 +1,4 @@
-package backends
+package drivers
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// fileBackend writes structured JSON logs to a local file, with optional
+// fileDriver writes structured JSON logs to a local file, with optional
 // rotation. Like the `stdout` driver, traces are kept in-process (so
 // `trace_id` still appears in log records) and metrics are no-op — the
 // driver is a log channel, not a transport.
@@ -27,73 +27,73 @@ import (
 // hosted backend, dev environments where stdout is too noisy. Not
 // recommended for containerised workloads (use `stdout` so the orchestrator
 // can collect logs instead).
-type fileBackend struct {
+type fileDriver struct {
 	handler slog.Handler
 	tp      *sdktrace.TracerProvider
 	close   func() error
 
-	stopRot  chan struct{} // nil when rotation goroutine not running
+	stopRot  chan struct{}
 	stopOnce sync.Once
 }
 
-// File rotation modes accepted via OBS_LOG_ROTATE.
+// File rotation modes accepted via OBSERVABILITY_LOG_FILE_ROTATION.
 const (
-	FileRotateNone  = "none"  // append-only, no rotation
-	FileRotateDaily = "daily" // rotate at local midnight
-	FileRotateSize  = "size"  // rotate when MaxSize is reached
+	LogFileRotationNone  = "none"  // append-only, no rotation
+	LogFileRotationDaily = "daily" // rotate at local midnight
+	LogFileRotationSize  = "size"  // rotate when MaxSize is reached
 )
 
-func newFile(s Spec) (*fileBackend, error) {
-	if s.FilePath == "" {
-		return nil, fmt.Errorf("file backend: FilePath required (set OBS_LOG_FILE)")
+func newFile(s Spec) (*fileDriver, error) {
+	if s.LogFilePath == "" {
+		return nil, fmt.Errorf("file driver: LogFilePath required (set OBSERVABILITY_LOG_FILE_PATH)")
 	}
 
-	abs, err := filepath.Abs(s.FilePath)
+	abs, err := filepath.Abs(s.LogFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("file backend: resolve path %q: %w", s.FilePath, err)
+		return nil, fmt.Errorf("file driver: resolve path %q: %w", s.LogFilePath, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return nil, fmt.Errorf("file backend: create log dir: %w", err)
+		return nil, fmt.Errorf("file driver: create log dir: %w", err)
 	}
 
-	rotate := strings.ToLower(s.FileRotate)
-	if rotate == "" {
-		rotate = FileRotateDaily
+	rotation := strings.ToLower(s.LogFileRotation)
+	if rotation == "" {
+		rotation = LogFileRotationDaily
 	}
 
 	var (
-		w        io.WriteCloser
-		lj       *lumberjack.Logger
-		closeFn  func() error
-		isDaily  bool
+		w       io.WriteCloser
+		lj      *lumberjack.Logger
+		closeFn func() error
+		isDaily bool
 	)
-	switch rotate {
-	case FileRotateNone:
+	switch rotation {
+	case LogFileRotationNone:
 		f, err := os.OpenFile(abs, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
-			return nil, fmt.Errorf("file backend: open %s: %w", abs, err)
+			return nil, fmt.Errorf("file driver: open %s: %w", abs, err)
 		}
 		w = f
 		closeFn = f.Close
 
-	case FileRotateSize, FileRotateDaily:
+	case LogFileRotationSize, LogFileRotationDaily:
 		lj = &lumberjack.Logger{
 			Filename:   abs,
-			MaxSize:    nonZeroInt(s.FileMaxSizeMB, 100),
-			MaxAge:     s.FileMaxAgeDays,
-			MaxBackups: s.FileMaxBackups,
-			Compress:   s.FileCompress,
+			MaxSize:    nonZeroInt(s.LogFileMaxSizeMB, 100),
+			MaxAge:     s.LogFileMaxAgeDays,
+			MaxBackups: s.LogFileMaxBackups,
+			Compress:   s.LogFileCompress,
 			LocalTime:  true,
 		}
 		w = lj
 		closeFn = lj.Close
-		isDaily = rotate == FileRotateDaily
+		isDaily = rotation == LogFileRotationDaily
 
 	default:
-		return nil, fmt.Errorf("file backend: unknown OBS_LOG_ROTATE %q (valid: none, size, daily)", rotate)
+		return nil, fmt.Errorf("file driver: unknown OBSERVABILITY_LOG_FILE_ROTATION %q (valid: none, size, daily)", rotation)
 	}
 
-	be := &fileBackend{
+	d := &fileDriver{
 		handler: slog.NewJSONHandler(w, &slog.HandlerOptions{Level: s.LogLevel}),
 		tp: sdktrace.NewTracerProvider(
 			sdktrace.WithSampler(samplerFor(s.TraceSampleRate)),
@@ -103,26 +103,26 @@ func newFile(s Spec) (*fileBackend, error) {
 	}
 
 	if isDaily {
-		be.startDailyRotator(lj)
+		d.startDailyRotator(lj)
 	}
-	return be, nil
+	return d, nil
 }
 
-func (b *fileBackend) LoggerHandler() slog.Handler          { return b.handler }
-func (b *fileBackend) TracerProvider() trace.TracerProvider { return b.tp }
-func (b *fileBackend) MeterProvider() metric.MeterProvider  { return metricnoop.NewMeterProvider() }
+func (d *fileDriver) LoggerHandler() slog.Handler          { return d.handler }
+func (d *fileDriver) TracerProvider() trace.TracerProvider { return d.tp }
+func (d *fileDriver) MeterProvider() metric.MeterProvider  { return metricnoop.NewMeterProvider() }
 
-func (b *fileBackend) Shutdown(ctx context.Context) error {
-	b.stopOnce.Do(func() {
-		if b.stopRot != nil {
-			close(b.stopRot)
+func (d *fileDriver) Shutdown(ctx context.Context) error {
+	d.stopOnce.Do(func() {
+		if d.stopRot != nil {
+			close(d.stopRot)
 		}
 	})
-	if err := b.tp.Shutdown(ctx); err != nil {
+	if err := d.tp.Shutdown(ctx); err != nil {
 		return err
 	}
-	if b.close != nil {
-		return b.close()
+	if d.close != nil {
+		return d.close()
 	}
 	return nil
 }
@@ -130,9 +130,9 @@ func (b *fileBackend) Shutdown(ctx context.Context) error {
 // startDailyRotator spawns a goroutine that calls lumberjack.Rotate() at
 // local midnight. Lumberjack's native rotation is size-based; this wrapper
 // adds time-based rotation on top.
-func (b *fileBackend) startDailyRotator(lj *lumberjack.Logger) {
-	b.stopRot = make(chan struct{})
-	stop := b.stopRot
+func (d *fileDriver) startDailyRotator(lj *lumberjack.Logger) {
+	d.stopRot = make(chan struct{})
+	stop := d.stopRot
 	go func() {
 		for {
 			wait := time.Until(nextMidnight(time.Now()))

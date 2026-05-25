@@ -9,25 +9,25 @@ import (
 )
 
 func TestLoadConfigFromEnv_Defaults(t *testing.T) {
-	t.Setenv("OBS_BACKEND", "")
-	t.Setenv("OBS_LOG_LEVEL", "")
-	t.Setenv("OBS_TRACE_SAMPLE", "")
+	t.Setenv("OBSERVABILITY_DRIVER", "")
+	t.Setenv("OBSERVABILITY_LOG_LEVEL", "")
+	t.Setenv("OBSERVABILITY_TRACE_SAMPLE_RATE", "")
 	t.Setenv("DEPLOYMENT_ENVIRONMENT", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "")
 	t.Setenv("AWS_REGION", "")
-	t.Setenv("OBS_LOG_GROUP", "")
-	t.Setenv("OBS_LOG_FILE", "")
-	t.Setenv("OBS_LOG_ROTATE", "")
-	t.Setenv("OBS_LOG_MAX_SIZE_MB", "")
-	t.Setenv("OBS_LOG_MAX_AGE_DAYS", "")
-	t.Setenv("OBS_LOG_MAX_BACKUPS", "")
-	t.Setenv("OBS_LOG_COMPRESS", "")
+	t.Setenv("OBSERVABILITY_CLOUDWATCH_LOG_GROUP", "")
+	t.Setenv("OBSERVABILITY_LOG_FILE_PATH", "")
+	t.Setenv("OBSERVABILITY_LOG_FILE_ROTATION", "")
+	t.Setenv("OBSERVABILITY_LOG_FILE_MAX_SIZE_MB", "")
+	t.Setenv("OBSERVABILITY_LOG_FILE_MAX_AGE_DAYS", "")
+	t.Setenv("OBSERVABILITY_LOG_FILE_MAX_BACKUPS", "")
+	t.Setenv("OBSERVABILITY_LOG_FILE_COMPRESS", "")
 
 	cfg := observability.LoadConfigFromEnv()
-	if cfg.Backend != observability.BackendStdout {
-		t.Errorf("Backend = %q, want %q", cfg.Backend, observability.BackendStdout)
+	if cfg.Driver != observability.DriverStdout {
+		t.Errorf("Driver = %q, want %q", cfg.Driver, observability.DriverStdout)
 	}
 	if cfg.LogLevel != slog.LevelInfo {
 		t.Errorf("LogLevel = %v, want %v", cfg.LogLevel, slog.LevelInfo)
@@ -44,27 +44,28 @@ func TestLoadConfigFromEnv_Defaults(t *testing.T) {
 	if !cfg.OTLPInsecure {
 		t.Errorf("OTLPInsecure = false, want true (default)")
 	}
-	if cfg.FileRotate != "daily" || cfg.FileMaxSizeMB != 100 || cfg.FileMaxAgeDays != 14 || !cfg.FileCompress {
+	if cfg.LogFileRotation != "daily" || cfg.LogFileMaxSizeMB != 100 ||
+		cfg.LogFileMaxAgeDays != 14 || !cfg.LogFileCompress {
 		t.Errorf("file defaults wrong: %+v", cfg)
 	}
 }
 
 func TestLoadConfigFromEnv_OverrideAll(t *testing.T) {
-	t.Setenv("OBS_BACKEND", "otlp")
-	t.Setenv("OBS_LOG_LEVEL", "warn")
-	t.Setenv("OBS_TRACE_SAMPLE", "0.25")
+	t.Setenv("OBSERVABILITY_DRIVER", "otlp")
+	t.Setenv("OBSERVABILITY_LOG_LEVEL", "warn")
+	t.Setenv("OBSERVABILITY_TRACE_SAMPLE_RATE", "0.25")
 	t.Setenv("DEPLOYMENT_ENVIRONMENT", "prod")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel:4317")
 	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http")
 	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "false")
 	t.Setenv("AWS_REGION", "ap-northeast-1")
-	t.Setenv("OBS_LOG_GROUP", "/svc/my-app")
+	t.Setenv("OBSERVABILITY_CLOUDWATCH_LOG_GROUP", "/svc/my-app")
 
 	cfg := observability.LoadConfigFromEnv()
-	if cfg.Backend != "otlp" || cfg.LogLevel != slog.LevelWarn || cfg.TraceSampleRate != 0.25 ||
+	if cfg.Driver != "otlp" || cfg.LogLevel != slog.LevelWarn || cfg.TraceSampleRate != 0.25 ||
 		cfg.Environment != "prod" || cfg.OTLPEndpoint != "otel:4317" ||
 		cfg.OTLPProtocol != "http" || cfg.OTLPInsecure || cfg.AWSRegion != "ap-northeast-1" ||
-		cfg.LogGroupName != "/svc/my-app" {
+		cfg.CloudWatchLogGroup != "/svc/my-app" {
 		t.Fatalf("override mismatch: %+v", cfg)
 	}
 }
@@ -79,21 +80,21 @@ func TestConfig_Validate(t *testing.T) {
 			name: "ok stdout",
 			cfg: observability.Config{
 				ServiceName: "svc",
-				Backend:     observability.BackendStdout,
+				Driver:      observability.DriverStdout,
 			},
 		},
 		{
 			name: "missing service name",
 			cfg: observability.Config{
-				Backend: observability.BackendStdout,
+				Driver: observability.DriverStdout,
 			},
 			wantErr: true,
 		},
 		{
-			name: "unknown backend",
+			name: "unknown driver",
 			cfg: observability.Config{
 				ServiceName: "svc",
-				Backend:     "voodoo",
+				Driver:      "voodoo",
 			},
 			wantErr: true,
 		},
@@ -101,7 +102,7 @@ func TestConfig_Validate(t *testing.T) {
 			name: "otlp without endpoint",
 			cfg: observability.Config{
 				ServiceName: "svc",
-				Backend:     observability.BackendOTLP,
+				Driver:      observability.DriverOTLP,
 			},
 			wantErr: true,
 		},
@@ -109,7 +110,7 @@ func TestConfig_Validate(t *testing.T) {
 			name: "file without path",
 			cfg: observability.Config{
 				ServiceName: "svc",
-				Backend:     observability.BackendFile,
+				Driver:      observability.DriverFile,
 			},
 			wantErr: true,
 		},
@@ -117,8 +118,8 @@ func TestConfig_Validate(t *testing.T) {
 			name: "file with path ok",
 			cfg: observability.Config{
 				ServiceName: "svc",
-				Backend:     observability.BackendFile,
-				FilePath:    "/tmp/log.log",
+				Driver:      observability.DriverFile,
+				LogFilePath: "/tmp/log.log",
 			},
 		},
 	}

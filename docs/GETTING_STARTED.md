@@ -40,10 +40,10 @@ func main() {
 }
 ```
 
-## 3. Run with the dev backend (no infrastructure)
+## 3. Run with the stdout driver (no infrastructure)
 
 ```bash
-OBS_BACKEND=stdout go run .
+OBSERVABILITY_DRIVER=stdout go run .
 ```
 
 Expected output (formatted for readability):
@@ -64,7 +64,21 @@ Expected output (formatted for readability):
 
 Note: the SDK auto-injects `trace_id` and `span_id` from the active span — you didn't pass them in.
 
-## 4. Switch to OTLP (push to godx-platform-observability)
+## 4. Switch to the file driver (Laravel-style local logs)
+
+For bare-metal / VM deployments where there is no log collector. Mirrors Laravel's `daily` channel.
+
+```bash
+OBSERVABILITY_DRIVER=file \
+OBSERVABILITY_LOG_FILE_PATH=./logs/app.log \
+go run .
+
+tail -f logs/app.log
+```
+
+Defaults: daily rotation, 14-day retention, gzip on rotation. See [DRIVERS.md](./DRIVERS.md#file) for tuning.
+
+## 5. Switch to OTLP (push to godx-platform-observability)
 
 Spin up the observability plane in a sibling repo:
 
@@ -76,14 +90,14 @@ cd godx-platform-observability && make up
 Then run your service against it:
 
 ```bash
-OBS_BACKEND=otlp \
+OBSERVABILITY_DRIVER=otlp \
 OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 \
 go run .
 ```
 
 Open Grafana at `http://localhost:3000` (default `admin/admin`) and find the trace under **Explore → Tempo**.
 
-## 5. Add an HTTP middleware
+## 6. Add an HTTP middleware
 
 ```go
 mux := http.NewServeMux()
@@ -104,5 +118,5 @@ Every request now produces:
 ## Next steps
 
 - **[OBSERVABILITY](./OBSERVABILITY.md)** — full SDK reference (logger, tracer, meter).
-- **[BACKENDS](./BACKENDS.md)** — driver pattern, adding a new backend.
+- **[DRIVERS](./DRIVERS.md)** — driver pattern, adding a new driver.
 - **[CONFIGURATION](./CONFIGURATION.md)** — every env var.

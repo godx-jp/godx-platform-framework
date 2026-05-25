@@ -14,7 +14,7 @@ func TestMiddleware_PropagatesCorrelationAndTrace(t *testing.T) {
 	_ = captureStdout(t, func() {
 		p, err := observability.NewProvider(context.Background(), observability.Config{
 			ServiceName: "mw-svc",
-			Backend:     observability.BackendStdout,
+			Driver:      observability.DriverStdout,
 			LogLevel:    slog.LevelInfo,
 		})
 		if err != nil {
@@ -58,7 +58,7 @@ func TestMiddleware_GeneratesCorrelationWhenMissing(t *testing.T) {
 	_ = captureStdout(t, func() {
 		p, err := observability.NewProvider(context.Background(), observability.Config{
 			ServiceName: "mw-svc",
-			Backend:     observability.BackendStdout,
+			Driver:      observability.DriverStdout,
 		})
 		if err != nil {
 			t.Fatalf("NewProvider: %v", err)

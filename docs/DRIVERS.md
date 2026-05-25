@@ -1,6 +1,6 @@
-# Backends
+# Drivers
 
-A backend is a **driver** that supplies the three concrete telemetry handles (`slog.Handler`, `trace.TracerProvider`, `metric.MeterProvider`) and a shutdown hook. The application never imports a backend; it only sets `OBS_BACKEND`.
+A **driver** is the in-process code that adapts the SDK's standard telemetry handles (`slog.Handler`, `trace.TracerProvider`, `metric.MeterProvider`) to a specific **destination** (a "backend" — Loki, CloudWatch, Datadog, a local file…). The application never imports a driver; it only sets `OBSERVABILITY_DRIVER`.
 
 This is the same pattern as `database/sql` drivers in Go, or Laravel's filesystem / queue / cache drivers in PHP.
 
@@ -15,10 +15,17 @@ This is the same pattern as `database/sql` drivers in Go, or Laravel's filesyste
 
 The decision of *where telemetry goes* belongs to operators, not developers.
 
-## Available drivers (v0.1.x)
+## Vocabulary
 
-| `OBS_BACKEND` | Status | What it does | Dependencies |
-|---------------|--------|--------------|--------------|
+- **Driver** — the Go package that implements the telemetry plumbing (`drivers.Driver` interface). Examples: stdout, file, otlp, cloudwatch.
+- **Backend** — the destination service that receives telemetry. Examples: Loki, Tempo, CloudWatch Logs, Datadog, New Relic, a local file on disk.
+
+Selecting a driver picks the backend implicitly: `OBSERVABILITY_DRIVER=otlp` + `OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317` ships telemetry to whichever backend that collector forwards to.
+
+## Available drivers (v0.2.x)
+
+| `OBSERVABILITY_DRIVER` | Status | What it does | Dependencies |
+|------------------------|--------|--------------|--------------|
 | `stdout` | ✅ stable | slog JSON to stdout, in-process tracer (always sample), no-op meter | none beyond OTel SDK |
 | `file` | ✅ stable | slog JSON to local file with Laravel-style rotation (`none` / `daily` / `size`), gzip, retention | `gopkg.in/natefinch/lumberjack.v2` |
 | `otlp` | ✅ stable | slog JSON to stdout + OTLP gRPC/HTTP for traces + metrics | OTel OTLP exporters |
@@ -36,32 +43,38 @@ Use for: local dev, unit tests, ephemeral CI containers, any deployment where an
 
 Use for: bare-metal / VM deployments, zero-budget production where there is no log collector. Mirrors Laravel's `single` and `daily` channels.
 
-- Logs: JSON lines appended to `OBS_LOG_FILE`. Parent directory is auto-created.
+- Logs: JSON lines appended to `OBSERVABILITY_LOG_FILE_PATH`. Parent directory is auto-created.
 - Traces: same as `stdout` (in-process, drops at shutdown; `trace_id` still appears in log records).
 - Metrics: no-op.
 
 | Env var | Type | Default | Purpose |
 |---------|------|---------|---------|
-| `OBS_LOG_FILE` | string | _required_ | Path to log file (absolute or relative). Parent dir auto-created. |
-| `OBS_LOG_ROTATE` | enum | `daily` | `none` (Laravel `single`) · `daily` (Laravel `daily`) · `size` (rotate by `OBS_LOG_MAX_SIZE_MB`) |
-| `OBS_LOG_MAX_SIZE_MB` | int | `100` | Size threshold for `size` and `daily` rotation |
-| `OBS_LOG_MAX_AGE_DAYS` | int | `14` | Delete rotated files older than N days; `0` = keep forever |
-| `OBS_LOG_MAX_BACKUPS` | int | `0` | Keep at most N rotated files; `0` = unlimited |
-| `OBS_LOG_COMPRESS` | bool | `true` | Gzip rotated files |
+| `OBSERVABILITY_LOG_FILE_PATH` | string | _required_ | Path to log file (absolute or relative). Parent dir auto-created. |
+| `OBSERVABILITY_LOG_FILE_ROTATION` | enum | `daily` | `none` (Laravel `single`) · `daily` (Laravel `daily`) · `size` |
+| `OBSERVABILITY_LOG_FILE_MAX_SIZE_MB` | int | `100` | Size threshold for `size` and `daily` rotation |
+| `OBSERVABILITY_LOG_FILE_MAX_AGE_DAYS` | int | `14` | Delete rotated files older than N days; `0` = keep forever |
+| `OBSERVABILITY_LOG_FILE_MAX_BACKUPS` | int | `0` | Keep at most N rotated files; `0` = unlimited |
+| `OBSERVABILITY_LOG_FILE_COMPRESS` | bool | `true` | Gzip rotated files |
 
 **Recipes** (matches Laravel `config/logging.php` channels):
 
 ```bash
 # Laravel `single` — append-only, no rotation
-OBS_BACKEND=file OBS_LOG_FILE=./logs/app.log OBS_LOG_ROTATE=none
+OBSERVABILITY_DRIVER=file \
+OBSERVABILITY_LOG_FILE_PATH=./logs/app.log \
+OBSERVABILITY_LOG_FILE_ROTATION=none
 
 # Laravel `daily` — rotate at midnight, keep 14 days, gzip
-OBS_BACKEND=file OBS_LOG_FILE=./logs/app.log
+OBSERVABILITY_DRIVER=file \
+OBSERVABILITY_LOG_FILE_PATH=./logs/app.log
 # (daily / 14d / gzip are the defaults)
 
 # Size-based rotation — useful for very chatty services
-OBS_BACKEND=file OBS_LOG_FILE=./logs/app.log \
-  OBS_LOG_ROTATE=size OBS_LOG_MAX_SIZE_MB=50 OBS_LOG_MAX_BACKUPS=20
+OBSERVABILITY_DRIVER=file \
+OBSERVABILITY_LOG_FILE_PATH=./logs/app.log \
+OBSERVABILITY_LOG_FILE_ROTATION=size \
+OBSERVABILITY_LOG_FILE_MAX_SIZE_MB=50 \
+OBSERVABILITY_LOG_FILE_MAX_BACKUPS=20
 ```
 
 **Caveats**:
@@ -77,20 +90,20 @@ Use for: any environment with an OTel-compatible receiver (godx-platform-observa
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `host:port` (no scheme) | _required_ |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` or `http` | `grpc` |
 | `OTEL_EXPORTER_OTLP_INSECURE` | `true` skips TLS verify | `true` |
-| `OBS_TRACE_SAMPLE` | sample rate `[0..1]` | `1.0` |
+| `OBSERVABILITY_TRACE_SAMPLE_RATE` | sample rate `[0..1]` | `1.0` |
 
 Logs are written to stdout (JSON) and are expected to be picked up out-of-process (Promtail / Fluent Bit / OTel Collector filelog receiver). This matches the standard container-log workflow and avoids dragging a third exporter into the binary.
 
-### `cloudwatch` (stub in 0.1.x)
+### `cloudwatch` (stub in 0.2.x)
 
-`NewProvider` returns `backends.ErrCloudWatchNotImplemented`. The 0.3.0 release will use AWS ADOT exporters to push logs to CloudWatch Logs, metrics to CloudWatch Metrics, and traces to X-Ray. Tracked env vars (already accepted by `LoadConfigFromEnv`): `AWS_REGION`, `OBS_LOG_GROUP`.
+`NewProvider` returns `drivers.ErrCloudWatchNotImplemented`. The 0.3.0 release will use AWS ADOT exporters to push logs to CloudWatch Logs, metrics to CloudWatch Metrics, and traces to X-Ray. Tracked env vars (already accepted by `LoadConfigFromEnv`): `AWS_REGION`, `OBSERVABILITY_CLOUDWATCH_LOG_GROUP`.
 
 ## Writing a custom driver
 
-A driver is anything that satisfies `backends.Backend`:
+A driver is anything that satisfies `drivers.Driver`:
 
 ```go
-type Backend interface {
+type Driver interface {
     LoggerHandler() slog.Handler
     TracerProvider() trace.TracerProvider
     MeterProvider() metric.MeterProvider
@@ -100,44 +113,44 @@ type Backend interface {
 
 Steps:
 
-1. Add a file under `observability/backends/yourdriver.go`.
+1. Add a file under `observability/drivers/yourdriver.go`.
 2. Implement the four methods.
-3. Add a `case "yourdriver":` to `backends.New`.
-4. Add a config field on `backends.Spec` if needed.
-5. Add a `OBS_BACKEND=yourdriver` test under `observability/`.
+3. Add a `case "yourdriver":` to `drivers.New`.
+4. Add a config field on `drivers.Spec` if needed.
+5. Add an `OBSERVABILITY_DRIVER=yourdriver` test under `observability/`.
 
-The Backend interface intentionally returns OTel `TracerProvider` / `MeterProvider` — that means your driver gets the entire OTel SDK for free. Most "new backend" drivers are 30-40 lines of OTel exporter wiring.
+The `Driver` interface intentionally returns OTel `TracerProvider` / `MeterProvider` — that means your driver gets the entire OTel SDK for free. Most "new driver" implementations are 30-40 lines of OTel exporter wiring.
 
-## Choosing a backend by environment
+## Choosing a driver by environment
 
 A common pattern:
 
 ```dockerfile
 # Dockerfile (dev image)
-ENV OBS_BACKEND=stdout
+ENV OBSERVABILITY_DRIVER=stdout
 ```
 
 ```yaml
 # helm values.production.yaml
 env:
-  OBS_BACKEND: otlp
+  OBSERVABILITY_DRIVER: otlp
   OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector.observability:4317
 ```
 
-```yaml
+```ini
 # bare-metal / systemd unit file — Laravel-style file logs
-Environment="OBS_BACKEND=file"
-Environment="OBS_LOG_FILE=/var/log/my-app/app.log"
-Environment="OBS_LOG_ROTATE=daily"
-Environment="OBS_LOG_MAX_AGE_DAYS=30"
+Environment="OBSERVABILITY_DRIVER=file"
+Environment="OBSERVABILITY_LOG_FILE_PATH=/var/log/my-app/app.log"
+Environment="OBSERVABILITY_LOG_FILE_ROTATION=daily"
+Environment="OBSERVABILITY_LOG_FILE_MAX_AGE_DAYS=30"
 ```
 
 ```yaml
 # helm values.aws.yaml (when 0.3.0 lands)
 env:
-  OBS_BACKEND: cloudwatch
+  OBSERVABILITY_DRIVER: cloudwatch
   AWS_REGION: ap-northeast-1
-  OBS_LOG_GROUP: /service/my-app
+  OBSERVABILITY_CLOUDWATCH_LOG_GROUP: /service/my-app
 ```
 
 Same binary, four environments, zero application changes.

@@ -1,4 +1,4 @@
-package backends
+package drivers
 
 import (
 	"context"
@@ -17,18 +17,18 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// otlpBackend exports traces and metrics over OTLP (gRPC or HTTP) and writes
+// otlpDriver exports traces and metrics over OTLP (gRPC or HTTP) and writes
 // logs as JSON to stdout. Log shipping is handled out-of-process (Promtail,
 // Fluent Bit, OTel Collector filelog receiver). This keeps the in-process
 // dependency surface small and aligns with the standard Loki / Datadog
 // container-log workflow.
-type otlpBackend struct {
+type otlpDriver struct {
 	handler slog.Handler
 	tp      *sdktrace.TracerProvider
 	mp      *sdkmetric.MeterProvider
 }
 
-func newOTLP(ctx context.Context, s Spec) (*otlpBackend, error) {
+func newOTLP(ctx context.Context, s Spec) (*otlpDriver, error) {
 	traceExp, err := newTraceExporter(ctx, s)
 	if err != nil {
 		return nil, fmt.Errorf("otlp trace exporter: %w", err)
@@ -50,22 +50,22 @@ func newOTLP(ctx context.Context, s Spec) (*otlpBackend, error) {
 		sdkmetric.WithResource(res),
 	)
 
-	return &otlpBackend{
+	return &otlpDriver{
 		handler: slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: s.LogLevel}),
 		tp:      tp,
 		mp:      mp,
 	}, nil
 }
 
-func (b *otlpBackend) LoggerHandler() slog.Handler          { return b.handler }
-func (b *otlpBackend) TracerProvider() trace.TracerProvider { return b.tp }
-func (b *otlpBackend) MeterProvider() metric.MeterProvider  { return b.mp }
+func (d *otlpDriver) LoggerHandler() slog.Handler          { return d.handler }
+func (d *otlpDriver) TracerProvider() trace.TracerProvider { return d.tp }
+func (d *otlpDriver) MeterProvider() metric.MeterProvider  { return d.mp }
 
-func (b *otlpBackend) Shutdown(ctx context.Context) error {
-	if err := b.tp.Shutdown(ctx); err != nil {
+func (d *otlpDriver) Shutdown(ctx context.Context) error {
+	if err := d.tp.Shutdown(ctx); err != nil {
 		return err
 	}
-	return b.mp.Shutdown(ctx)
+	return d.mp.Shutdown(ctx)
 }
 
 func newTraceExporter(ctx context.Context, s Spec) (sdktrace.SpanExporter, error) {

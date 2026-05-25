@@ -9,7 +9,7 @@ A minimal `net/http` server wired with the framework observability middleware. D
 ## Run
 
 ```bash
-OBS_BACKEND=stdout go run .
+OBSERVABILITY_DRIVER=stdout go run .
 
 # Another terminal:
 curl -i http://localhost:8080/hello
@@ -18,11 +18,16 @@ curl -i -H 'X-Correlation-ID: my-trace-1' http://localhost:8080/hello
 
 You'll see one `http_request` JSON line per request (logged by the middleware) and one `answering hello` line per request (logged by the handler) — both sharing the same `trace_id`.
 
-## Switch backend
+## Switch driver
 
 ```bash
+# File — Laravel-style local file, daily rotation, 14-day retention, gzip
+OBSERVABILITY_DRIVER=file \
+OBSERVABILITY_LOG_FILE_PATH=./logs/app.log \
+go run .
+
 # OTLP — needs an OTel Collector on :4317 (run godx-platform-observability with `make up`)
-OBS_BACKEND=otlp \
+OBSERVABILITY_DRIVER=otlp \
 OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 \
 go run .
 ```

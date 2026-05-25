@@ -8,16 +8,20 @@ import (
 	"strings"
 )
 
-// Backend identifiers recognised by [LoadConfigFromEnv].
+// Driver identifiers recognised by [LoadConfigFromEnv].
+//
+// The "driver" is the in-process code that talks to a telemetry destination
+// ("backend"). Selecting a driver is the only knob you need to swap where
+// telemetry goes.
 const (
-	BackendStdout     = "stdout"
-	BackendFile       = "file"
-	BackendOTLP       = "otlp"
-	BackendCloudWatch = "cloudwatch"
+	DriverStdout     = "stdout"     // pretty JSON logs to stdout; dev / containers
+	DriverFile       = "file"       // local file with optional rotation; bare-metal / VM
+	DriverOTLP       = "otlp"       // OTLP gRPC/HTTP; godx-platform-observability, Datadog, New Relic, …
+	DriverCloudWatch = "cloudwatch" // AWS CloudWatch Logs/Metrics + X-Ray (stub in 0.2.x, full in 0.3.0)
 )
 
-// Config controls observability bootstrap. The framework module loads it from
-// the environment (see [LoadConfigFromEnv]); callers may construct one
+// Config controls observability bootstrap. The framework module loads it
+// from the environment (see [LoadConfigFromEnv]); callers may construct one
 // explicitly for tests or for embedding the SDK outside the framework.
 type Config struct {
 	// ServiceName / ServiceVersion populate the `service.name` and
@@ -29,8 +33,8 @@ type Config struct {
 	// Environment populates `deployment.environment` (OTel semconv).
 	Environment string
 
-	// Backend selects which driver runs. See backends/ for valid values.
-	Backend string
+	// Driver selects which driver runs. See drivers/ for valid values.
+	Driver string
 
 	// LogLevel applied to the slog handler.
 	LogLevel slog.Level
@@ -38,86 +42,86 @@ type Config struct {
 	// TraceSampleRate in [0,1]. Values outside the range mean AlwaysSample.
 	TraceSampleRate float64
 
-	// OTLPEndpoint is the OTLP host:port (no scheme) when Backend == "otlp".
+	// OTLPEndpoint is the OTLP host:port (no scheme) when Driver == "otlp".
 	OTLPEndpoint string
 	// OTLPProtocol is "grpc" or "http". Defaults to "grpc".
 	OTLPProtocol string
 	// OTLPInsecure skips TLS verification (dev only).
 	OTLPInsecure bool
 
-	// CloudWatch-only fields. Reserved for the 0.2.0 cloudwatch backend.
-	AWSRegion    string
-	LogGroupName string
+	// CloudWatch-only fields. Reserved for the 0.3.0 cloudwatch driver.
+	AWSRegion          string
+	CloudWatchLogGroup string
 
-	// File-driver fields. Used when Backend == "file" — Laravel-style
-	// local file logging.
-	FilePath       string // absolute or relative path; parent dir auto-created
-	FileRotate     string // "none" | "daily" | "size"; default "daily"
-	FileMaxSizeMB  int    // size-rotation threshold; default 100
-	FileMaxAgeDays int    // delete rotated files older than N days; 0 = forever
-	FileMaxBackups int    // keep at most N rotated files; 0 = unlimited
-	FileCompress   bool   // gzip rotated files
+	// File-driver fields. Used when Driver == "file" — Laravel-style local
+	// file logging.
+	LogFilePath       string // absolute or relative path; parent dir auto-created
+	LogFileRotation   string // "none" | "daily" | "size"; default "daily"
+	LogFileMaxSizeMB  int    // size-rotation threshold; default 100
+	LogFileMaxAgeDays int    // delete rotated files older than N days; 0 = forever
+	LogFileMaxBackups int    // keep at most N rotated files; 0 = unlimited
+	LogFileCompress   bool   // gzip rotated files
 }
 
 // LoadConfigFromEnv reads SDK configuration from environment variables.
 //
 // Reads, with defaults:
 //
-//	OBS_BACKEND                  stdout
-//	OBS_LOG_LEVEL                info
-//	OBS_TRACE_SAMPLE             1.0
-//	DEPLOYMENT_ENVIRONMENT       dev
-//	OTEL_EXPORTER_OTLP_ENDPOINT  http://localhost:4317
-//	OTEL_EXPORTER_OTLP_PROTOCOL  grpc
-//	OTEL_EXPORTER_OTLP_INSECURE  true
-//	AWS_REGION                   (empty)
-//	OBS_LOG_GROUP                /service/{ServiceName}
-//	OBS_LOG_FILE                 (empty)
-//	OBS_LOG_ROTATE               daily
-//	OBS_LOG_MAX_SIZE_MB          100
-//	OBS_LOG_MAX_AGE_DAYS         14
-//	OBS_LOG_MAX_BACKUPS          0
-//	OBS_LOG_COMPRESS             true
+//	OBSERVABILITY_DRIVER                  stdout
+//	OBSERVABILITY_LOG_LEVEL               info
+//	OBSERVABILITY_TRACE_SAMPLE_RATE       1.0
+//	DEPLOYMENT_ENVIRONMENT                dev
+//	OTEL_EXPORTER_OTLP_ENDPOINT           (empty)
+//	OTEL_EXPORTER_OTLP_PROTOCOL           grpc
+//	OTEL_EXPORTER_OTLP_INSECURE           true
+//	AWS_REGION                            (empty)
+//	OBSERVABILITY_CLOUDWATCH_LOG_GROUP    (empty)
+//	OBSERVABILITY_LOG_FILE_PATH           (empty)
+//	OBSERVABILITY_LOG_FILE_ROTATION       daily
+//	OBSERVABILITY_LOG_FILE_MAX_SIZE_MB    100
+//	OBSERVABILITY_LOG_FILE_MAX_AGE_DAYS   14
+//	OBSERVABILITY_LOG_FILE_MAX_BACKUPS    0
+//	OBSERVABILITY_LOG_FILE_COMPRESS       true
 //
 // ServiceName / ServiceVersion are not populated by this function; the
 // framework module sets them from [framework.App].
 func LoadConfigFromEnv() Config {
 	cfg := Config{
-		Backend:         getEnv("OBS_BACKEND", BackendStdout),
-		LogLevel:        parseLogLevel(getEnv("OBS_LOG_LEVEL", "info")),
-		TraceSampleRate: parseFloat(getEnv("OBS_TRACE_SAMPLE", "1.0"), 1.0),
-		Environment:     getEnv("DEPLOYMENT_ENVIRONMENT", "dev"),
-		OTLPEndpoint:    getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
-		OTLPProtocol:    getEnv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"),
-		OTLPInsecure:    parseBool(getEnv("OTEL_EXPORTER_OTLP_INSECURE", "true"), true),
-		AWSRegion:       os.Getenv("AWS_REGION"),
-		LogGroupName:    os.Getenv("OBS_LOG_GROUP"),
-		FilePath:        os.Getenv("OBS_LOG_FILE"),
-		FileRotate:      getEnv("OBS_LOG_ROTATE", "daily"),
-		FileMaxSizeMB:   parseInt(getEnv("OBS_LOG_MAX_SIZE_MB", "100"), 100),
-		FileMaxAgeDays:  parseInt(getEnv("OBS_LOG_MAX_AGE_DAYS", "14"), 14),
-		FileMaxBackups:  parseInt(getEnv("OBS_LOG_MAX_BACKUPS", "0"), 0),
-		FileCompress:    parseBool(getEnv("OBS_LOG_COMPRESS", "true"), true),
+		Driver:             getEnv("OBSERVABILITY_DRIVER", DriverStdout),
+		LogLevel:           parseLogLevel(getEnv("OBSERVABILITY_LOG_LEVEL", "info")),
+		TraceSampleRate:    parseFloat(getEnv("OBSERVABILITY_TRACE_SAMPLE_RATE", "1.0"), 1.0),
+		Environment:        getEnv("DEPLOYMENT_ENVIRONMENT", "dev"),
+		OTLPEndpoint:       getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+		OTLPProtocol:       getEnv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"),
+		OTLPInsecure:       parseBool(getEnv("OTEL_EXPORTER_OTLP_INSECURE", "true"), true),
+		AWSRegion:          os.Getenv("AWS_REGION"),
+		CloudWatchLogGroup: os.Getenv("OBSERVABILITY_CLOUDWATCH_LOG_GROUP"),
+		LogFilePath:        os.Getenv("OBSERVABILITY_LOG_FILE_PATH"),
+		LogFileRotation:    getEnv("OBSERVABILITY_LOG_FILE_ROTATION", "daily"),
+		LogFileMaxSizeMB:   parseInt(getEnv("OBSERVABILITY_LOG_FILE_MAX_SIZE_MB", "100"), 100),
+		LogFileMaxAgeDays:  parseInt(getEnv("OBSERVABILITY_LOG_FILE_MAX_AGE_DAYS", "14"), 14),
+		LogFileMaxBackups:  parseInt(getEnv("OBSERVABILITY_LOG_FILE_MAX_BACKUPS", "0"), 0),
+		LogFileCompress:    parseBool(getEnv("OBSERVABILITY_LOG_FILE_COMPRESS", "true"), true),
 	}
 	return cfg
 }
 
 // Validate returns an error if the config is malformed for its selected
-// backend. ServiceName must be non-empty.
+// driver. ServiceName must be non-empty.
 func (c Config) Validate() error {
 	if c.ServiceName == "" {
 		return fmt.Errorf("observability: ServiceName is required")
 	}
-	switch c.Backend {
-	case BackendStdout, BackendFile, BackendOTLP, BackendCloudWatch:
+	switch c.Driver {
+	case DriverStdout, DriverFile, DriverOTLP, DriverCloudWatch:
 	default:
-		return fmt.Errorf("observability: unknown backend %q (valid: stdout, file, otlp, cloudwatch)", c.Backend)
+		return fmt.Errorf("observability: unknown driver %q (valid: stdout, file, otlp, cloudwatch)", c.Driver)
 	}
-	if c.Backend == BackendOTLP && c.OTLPEndpoint == "" {
-		return fmt.Errorf("observability: OTLPEndpoint required when backend=otlp (set OTEL_EXPORTER_OTLP_ENDPOINT)")
+	if c.Driver == DriverOTLP && c.OTLPEndpoint == "" {
+		return fmt.Errorf("observability: OTLPEndpoint required when driver=otlp (set OTEL_EXPORTER_OTLP_ENDPOINT)")
 	}
-	if c.Backend == BackendFile && c.FilePath == "" {
-		return fmt.Errorf("observability: FilePath required when backend=file (set OBS_LOG_FILE)")
+	if c.Driver == DriverFile && c.LogFilePath == "" {
+		return fmt.Errorf("observability: LogFilePath required when driver=file (set OBSERVABILITY_LOG_FILE_PATH)")
 	}
 	return nil
 }

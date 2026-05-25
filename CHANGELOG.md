@@ -4,18 +4,38 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
-### Added
-- `observability/backends/file.go` — Laravel-style local file log driver.
-  - `OBS_BACKEND=file` selects it.
-  - `OBS_LOG_ROTATE`: `none` (Laravel `single` channel) · `daily` (Laravel `daily`) · `size` (rotate by `OBS_LOG_MAX_SIZE_MB`).
-  - `OBS_LOG_MAX_AGE_DAYS`, `OBS_LOG_MAX_BACKUPS`, `OBS_LOG_COMPRESS` for retention.
-  - Parent directory auto-created. Rotation uses `gopkg.in/natefinch/lumberjack.v2`.
-  - Targets zero-budget / bare-metal / VM deployments where no log collector is available.
-- `LoadConfigFromEnv` reads the new `OBS_LOG_*` env vars.
-- New tests under `observability/file_test.go`.
+## [0.2.0] — 2026-05-25
 
-### Changed
-- Roadmap: CloudWatch driver moves from 0.2.0 → 0.3.0; 0.2.0 now plans `httpx` + stack/multi-backend log driver.
+This release is a **breaking rename** to clarify naming. No behaviour changes. Pin to `v0.1.0` if you need the old names; upgrade by replacing `OBS_*` → `OBSERVABILITY_*` and `Backend` → `Driver` in your code and env files.
+
+### Added (carried from unreleased 0.1.x)
+- `observability/drivers/file.go` — Laravel-style local file log driver (`none` / `daily` / `size` rotation, gzip, retention) for zero-budget / bare-metal / VM deployments where no log collector is available. Uses `gopkg.in/natefinch/lumberjack.v2`. Parent directory auto-created.
+
+### Changed (breaking)
+- **Package rename**: `observability/backends/` → `observability/drivers/`.
+- **Interface rename**: `backends.Backend` → `drivers.Driver`. The Go convention (`database/sql.Driver`) and Laravel terminology both use "driver" for the swappable implementation.
+- **Type rename**: `backends.Spec` → `drivers.Spec`.
+- **Const rename**: `BackendStdout`/`BackendFile`/`BackendOTLP`/`BackendCloudWatch` → `DriverStdout`/`DriverFile`/`DriverOTLP`/`DriverCloudWatch`.
+- **Config field rename**: `Config.Backend` → `Config.Driver`. `Config.FilePath` → `Config.LogFilePath`. `Config.FileRotate` → `Config.LogFileRotation`. `Config.File*` → `Config.LogFile*` (all file-driver fields prefixed with `LogFile`). `Config.LogGroupName` → `Config.CloudWatchLogGroup`.
+- **Method rename**: `Provider.Backend()` → `Provider.Driver()`.
+- **File rotation consts**: `FileRotateNone/Daily/Size` → `LogFileRotationNone/Daily/Size` (now in `drivers` package).
+- **Env var rename** — all SDK env vars now use the full word `OBSERVABILITY_*` (no abbreviations); industry-standard vars (`OTEL_*`, `AWS_*`, `DEPLOYMENT_ENVIRONMENT`) are unchanged.
+
+  | Old | New |
+  |-----|-----|
+  | `OBS_BACKEND` | `OBSERVABILITY_DRIVER` |
+  | `OBS_LOG_LEVEL` | `OBSERVABILITY_LOG_LEVEL` |
+  | `OBS_TRACE_SAMPLE` | `OBSERVABILITY_TRACE_SAMPLE_RATE` |
+  | `OBS_LOG_FILE` | `OBSERVABILITY_LOG_FILE_PATH` |
+  | `OBS_LOG_ROTATE` | `OBSERVABILITY_LOG_FILE_ROTATION` |
+  | `OBS_LOG_MAX_SIZE_MB` | `OBSERVABILITY_LOG_FILE_MAX_SIZE_MB` |
+  | `OBS_LOG_MAX_AGE_DAYS` | `OBSERVABILITY_LOG_FILE_MAX_AGE_DAYS` |
+  | `OBS_LOG_MAX_BACKUPS` | `OBSERVABILITY_LOG_FILE_MAX_BACKUPS` |
+  | `OBS_LOG_COMPRESS` | `OBSERVABILITY_LOG_FILE_COMPRESS` |
+  | `OBS_LOG_GROUP` | `OBSERVABILITY_CLOUDWATCH_LOG_GROUP` |
+
+- **Doc rename**: `docs/BACKENDS.md` → `docs/DRIVERS.md`, with a new "Vocabulary" section explaining driver-vs-backend.
+- Roadmap: CloudWatch driver moves from 0.2.0 → 0.3.0; 0.3.0 now lands AWS ADOT + configurable correlation header; httpx targeted for 0.2.x → 0.3.x.
 
 ## [0.1.0] — 2026-05-25
 

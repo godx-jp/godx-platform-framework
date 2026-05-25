@@ -4,7 +4,7 @@
 //
 // Run:
 //
-//	OBS_BACKEND=stdout go run .
+//	OBSERVABILITY_DRIVER=stdout go run .
 //	curl -i http://localhost:8080/hello
 package main
 

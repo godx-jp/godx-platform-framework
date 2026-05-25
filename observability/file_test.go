@@ -11,19 +11,19 @@ import (
 	"testing"
 
 	"github.com/godx-jp/godx-platform-framework/observability"
-	"github.com/godx-jp/godx-platform-framework/observability/backends"
+	"github.com/godx-jp/godx-platform-framework/observability/drivers"
 )
 
-func TestFileBackend_Single_WritesJSONLine(t *testing.T) {
+func TestFileDriver_Single_WritesJSONLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "app.log")
 
 	p, err := observability.NewProvider(context.Background(), observability.Config{
-		ServiceName: "file-svc",
-		Backend:     observability.BackendFile,
-		LogLevel:    slog.LevelInfo,
-		FilePath:    path,
-		FileRotate:  backends.FileRotateNone,
+		ServiceName:     "file-svc",
+		Driver:          observability.DriverFile,
+		LogLevel:        slog.LevelInfo,
+		LogFilePath:     path,
+		LogFileRotation: drivers.LogFileRotationNone,
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -52,15 +52,15 @@ func TestFileBackend_Single_WritesJSONLine(t *testing.T) {
 	}
 }
 
-func TestFileBackend_AutoCreatesParentDir(t *testing.T) {
+func TestFileDriver_AutoCreatesParentDir(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "deep", "nested", "app.log")
 
 	p, err := observability.NewProvider(context.Background(), observability.Config{
-		ServiceName: "svc",
-		Backend:     observability.BackendFile,
-		FilePath:    path,
-		FileRotate:  backends.FileRotateNone,
+		ServiceName:     "svc",
+		Driver:          observability.DriverFile,
+		LogFilePath:     path,
+		LogFileRotation: drivers.LogFileRotationNone,
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -73,15 +73,15 @@ func TestFileBackend_AutoCreatesParentDir(t *testing.T) {
 	}
 }
 
-func TestFileBackend_DefaultRotateIsDaily(t *testing.T) {
+func TestFileDriver_DefaultRotationIsDaily(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "app.log")
 
 	p, err := observability.NewProvider(context.Background(), observability.Config{
 		ServiceName: "svc",
-		Backend:     observability.BackendFile,
-		FilePath:    path,
-		// FileRotate intentionally empty → daily
+		Driver:      observability.DriverFile,
+		LogFilePath: path,
+		// LogFileRotation intentionally empty → daily
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -92,46 +92,46 @@ func TestFileBackend_DefaultRotateIsDaily(t *testing.T) {
 	}
 }
 
-func TestFileBackend_UnknownRotateRejected(t *testing.T) {
+func TestFileDriver_UnknownRotationRejected(t *testing.T) {
 	dir := t.TempDir()
 	_, err := observability.NewProvider(context.Background(), observability.Config{
-		ServiceName: "svc",
-		Backend:     observability.BackendFile,
-		FilePath:    filepath.Join(dir, "x.log"),
-		FileRotate:  "monthly",
+		ServiceName:     "svc",
+		Driver:          observability.DriverFile,
+		LogFilePath:     filepath.Join(dir, "x.log"),
+		LogFileRotation: "monthly",
 	})
 	if err == nil {
-		t.Fatalf("expected error for unknown rotate mode")
+		t.Fatalf("expected error for unknown rotation mode")
 	}
-	if !strings.Contains(err.Error(), "OBS_LOG_ROTATE") {
-		t.Fatalf("err should mention OBS_LOG_ROTATE: %v", err)
+	if !strings.Contains(err.Error(), "OBSERVABILITY_LOG_FILE_ROTATION") {
+		t.Fatalf("err should mention OBSERVABILITY_LOG_FILE_ROTATION: %v", err)
 	}
 }
 
-func TestFileBackend_MissingPathRejected(t *testing.T) {
+func TestFileDriver_MissingPathRejected(t *testing.T) {
 	_, err := observability.NewProvider(context.Background(), observability.Config{
 		ServiceName: "svc",
-		Backend:     observability.BackendFile,
-		// FilePath missing
+		Driver:      observability.DriverFile,
+		// LogFilePath missing
 	})
 	if err == nil || !errors.Is(err, err) {
 		t.Fatalf("expected error for missing path")
 	}
-	if !strings.Contains(err.Error(), "OBS_LOG_FILE") {
-		t.Fatalf("err should mention OBS_LOG_FILE: %v", err)
+	if !strings.Contains(err.Error(), "OBSERVABILITY_LOG_FILE_PATH") {
+		t.Fatalf("err should mention OBSERVABILITY_LOG_FILE_PATH: %v", err)
 	}
 }
 
-func TestFileBackend_LogLevelFiltered(t *testing.T) {
+func TestFileDriver_LogLevelFiltered(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "app.log")
 
 	p, err := observability.NewProvider(context.Background(), observability.Config{
-		ServiceName: "svc",
-		Backend:     observability.BackendFile,
-		LogLevel:    slog.LevelWarn,
-		FilePath:    path,
-		FileRotate:  backends.FileRotateNone,
+		ServiceName:     "svc",
+		Driver:          observability.DriverFile,
+		LogLevel:        slog.LevelWarn,
+		LogFilePath:     path,
+		LogFileRotation: drivers.LogFileRotationNone,
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)

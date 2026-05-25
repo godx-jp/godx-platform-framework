@@ -15,7 +15,7 @@ import (
 )
 
 // captureStdout swaps os.Stdout for a pipe, runs fn, then returns whatever
-// the fn produced. Slog stdout backend writes there directly so we can
+// the fn produced. The stdout driver writes there directly so we can
 // inspect the JSON record format.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
@@ -49,7 +49,7 @@ func TestProvider_Stdout_LoggerEmitsServiceAttrs(t *testing.T) {
 			ServiceName:    "svc-A",
 			ServiceVersion: "9.9.9",
 			Environment:    "test",
-			Backend:        observability.BackendStdout,
+			Driver:         observability.DriverStdout,
 			LogLevel:       slog.LevelInfo,
 		})
 		if err != nil {
@@ -70,7 +70,7 @@ func TestProvider_LoggerInjectsTraceID(t *testing.T) {
 	out := captureStdout(t, func() {
 		p, err := observability.NewProvider(context.Background(), observability.Config{
 			ServiceName: "svc",
-			Backend:     observability.BackendStdout,
+			Driver:      observability.DriverStdout,
 		})
 		if err != nil {
 			t.Fatalf("NewProvider: %v", err)
@@ -93,7 +93,7 @@ func TestProvider_LoggerInjectsCorrelationID(t *testing.T) {
 	out := captureStdout(t, func() {
 		p, err := observability.NewProvider(context.Background(), observability.Config{
 			ServiceName: "svc",
-			Backend:     observability.BackendStdout,
+			Driver:      observability.DriverStdout,
 		})
 		if err != nil {
 			t.Fatalf("NewProvider: %v", err)
@@ -113,20 +113,20 @@ func TestProvider_LoggerInjectsCorrelationID(t *testing.T) {
 func TestProvider_OTLP_RequiresEndpoint(t *testing.T) {
 	_, err := observability.NewProvider(context.Background(), observability.Config{
 		ServiceName: "svc",
-		Backend:     observability.BackendOTLP,
+		Driver:      observability.DriverOTLP,
 	})
 	if err == nil {
 		t.Fatalf("expected error for OTLP with no endpoint")
 	}
 }
 
-func TestProvider_CloudWatch_NotImplementedInV01(t *testing.T) {
+func TestProvider_CloudWatch_NotImplementedInV02(t *testing.T) {
 	_, err := observability.NewProvider(context.Background(), observability.Config{
 		ServiceName: "svc",
-		Backend:     observability.BackendCloudWatch,
+		Driver:      observability.DriverCloudWatch,
 	})
 	if err == nil {
-		t.Fatalf("expected ErrCloudWatchNotImplemented for cloudwatch backend in v0.1.0")
+		t.Fatalf("expected ErrCloudWatchNotImplemented for cloudwatch driver in v0.2.x")
 	}
 	if !strings.Contains(err.Error(), "cloudwatch") {
 		t.Fatalf("err should mention cloudwatch: %v", err)
@@ -135,14 +135,14 @@ func TestProvider_CloudWatch_NotImplementedInV01(t *testing.T) {
 
 func TestModule_WiredIntoApp(t *testing.T) {
 	_ = captureStdout(t, func() {
-		t.Setenv("OBS_BACKEND", "stdout")
+		t.Setenv("OBSERVABILITY_DRIVER", "stdout")
 		app := framework.New("module-svc", "1.0.0").Use(observability.Module)
 		if err := app.Init(context.Background()); err != nil {
 			t.Fatalf("Init: %v", err)
 		}
 		p := observability.FromApp(app)
-		if p.Backend() != "stdout" {
-			t.Fatalf("backend = %q, want stdout", p.Backend())
+		if p.Driver() != "stdout" {
+			t.Fatalf("driver = %q, want stdout", p.Driver())
 		}
 		if err := app.Shutdown(context.Background()); err != nil {
 			t.Fatalf("Shutdown: %v", err)
