@@ -4,6 +4,33 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-05-25
+
+Ships the `hashing/` module — Laravel's `Hash` facade with three modern drivers, self-describing encoded output, and explicit `NeedsRehash` semantics for safe work-factor upgrades. Third release in the Laravel-parity reshuffle.
+
+### Added
+
+- **`hashing/` module** — `Manager` holds one or more named `Hasher` instances; `Default()` returns the primary, `Hasher(name)` returns a specific one, `CheckAny(ctx, plain, hash)` resolves a stored hash to whichever driver understands its prefix (`$2y$`, `$argon2id$`, `$scrypt$`) — perfect for migrations.
+- **`hashing/driver/`** — public contract: `Hasher` interface with `Make / Check / NeedsRehash / Info` plus `Info{Algorithm, Params}` for diagnostics. `Spec` carries every driver's tunables. Sentinel errors `ErrInvalidHash`, `ErrUnknownFormat`, `ErrPasswordTooLong`, `ErrIncompatibleParams`. Registry mirrors the cache/config shape.
+- **`drivers/bcrypt`** — Laravel-default. Cost 4..31 (default 12). 72-byte plaintext hard limit surfaces as `ErrPasswordTooLong`. `NeedsRehash` true when stored cost < configured cost.
+- **`drivers/argon2id`** — PHC-format encoded output (`$argon2id$v=19$m=…,t=…,p=…$salt$digest`) — interoperates with Laravel, PHP, Python passlib, and the Argon2 reference. Defaults match OWASP 2024 (64 MiB / 3 iterations / 2 threads). `NeedsRehash` upgrades on any weaker param.
+- **`drivers/scrypt`** — RFC 7914 with a `$scrypt$ln=…,r=…,p=…$salt$digest` custom encoding (stores log2(N) so rehash math stays exact). Defaults match RFC 7914 interactive-login guidance.
+- **`hashing.Module`** — env-driven (`HASHING_DEFAULT`, `HASHING_HASHERS`, `HASHING_BCRYPT_COST`, `HASHING_ARGON2ID_*`, `HASHING_SCRYPT_*`). `ModuleWithConfig` for code-driven wiring. `MustDefault()` returns a bcrypt hasher without the App boilerplate for tests and scripts.
+- **`examples/hashing/main.go`** — runnable demo: Make / Check correct + wrong / Info / NeedsRehash across driver choice.
+- **`docs/modules/hashing.md`** — full reference: drivers, mixed-driver deployments, env vars, Laravel mapping, Migrating from go-common section.
+
+### Tests
+
+- **`hashing/conformance_test.go`** — driver-agnostic suite that asserts every Hasher round-trips, rejects wrong plaintext, returns useful `Info`, refuses garbage encodings, and produces salt-randomised output. Runs against all three drivers.
+- **`hashing/manager_test.go`** — Default / named lookup, sorted Hashers list, duplicate-name + nil-hasher rejection, mixed-driver `CheckAny` resolution, idempotent Shutdown.
+- **`hashing/edges_test.go`** — bcrypt rehash threshold, bcrypt 72-byte limit, bcrypt invalid hash, bcrypt out-of-range cost rejection, argon2id rehash threshold, argon2id malformed-segment / wrong-variant / unsupported-version rejection, argon2id memory-vs-threads constraint, scrypt rehash threshold, scrypt non-power-of-2 N rejection, scrypt invalid hash, cross-driver `Info` returns `ErrUnknownFormat`, `MustDefault` returns bcrypt-prefixed output.
+- **`hashing/driver/registry_test.go`** — Register / Lookup / Names / New round trip, empty-name + nil-constructor panics, sentinel errors distinct under `errors.Is`.
+- **`hashing/module_test.go`** — Module wires the manager into the App, env loading (defaults + overrides), Validate rejects malformed configs, context helpers.
+
+### Dependencies
+
+- `golang.org/x/crypto` promoted to a direct dependency (already pulled in indirectly).
+
 ## [0.8.1] — 2026-05-25
 
 Ships the `events/` module — an in-process event bus with wildcard listeners, optional async worker pool, and `framework.App` wiring. Second release in the Laravel-parity roadmap reshuffle.

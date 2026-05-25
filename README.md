@@ -3,7 +3,7 @@
 > **Opinionated Go SDK by godx** — modular, OpenTelemetry-native, backend-agnostic.
 > Write once, swap backends (godx-platform-observability ↔ AWS CloudWatch ↔ Datadog ↔ …) by changing one env var.
 
-[![Version](https://img.shields.io/badge/version-0.8.1-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.2-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](./LICENSE)
 [![Maintainer](https://img.shields.io/badge/by-godx-black.svg)](#)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](https://go.dev)
@@ -93,7 +93,7 @@ go run .
 | `cache` | stable (v0.7.0) | Laravel-style cache — memory · file · redis (DB-backed cache intentionally out of scope) |
 | `config` | stable (v0.8.0) | layered configuration repository — env · file (yaml/json/toml) · static · remote (heavy, roadmap) |
 | `events` | stable (v0.8.1) | sync + async dispatcher, wildcard listeners (`user.*`, `*.deleted`) |
-| `hashing` | roadmap (v0.8.2) | bcrypt · argon2id · scrypt — Laravel `Hash::` parity |
+| `hashing` | stable (v0.8.2) | bcrypt · argon2id · scrypt — Laravel `Hash::` parity with `NeedsRehash` |
 | `encryption` | roadmap (v0.8.3) | aesgcm · chacha20poly1305 — versioned key rotation, Laravel `Crypt::` parity |
 | `pipeline` | roadmap (v0.8.4) | composable middleware chain — Laravel `Pipeline` parity |
 | `secrets` | roadmap (v0.8.5) | env · file · vault · gcpsm · awssm |
@@ -293,6 +293,7 @@ The internal layout of every future module (storage, cache, queue, ...) is ident
 | [modules/cache](./docs/modules/cache.md) | App developers using cache |
 | [modules/config](./docs/modules/config.md) | App developers using config |
 | [modules/events](./docs/modules/events.md) | App developers using events |
+| [modules/hashing](./docs/modules/hashing.md) | App developers using hashing |
 | [CONFIGURATION](./docs/CONFIGURATION.md) | Operators — every env var |
 | [VERSIONING](./docs/VERSIONING.md) | Consumers — SemVer policy |
 
