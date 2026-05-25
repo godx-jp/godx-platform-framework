@@ -24,7 +24,7 @@ observability/
 │   ├── file/           (light — auto)
 │   ├── stack/          (light — auto)
 │   ├── otlp/           (heavy — opt-in blank import)
-│   └── cloudwatch/     (heavy — opt-in; stub until 0.5.0)
+│   └── cloudwatch/     (heavy — opt-in; CloudWatch Logs v0.13.0)
 └── middleware/         Optional HTTP middleware sub-package
 ```
 

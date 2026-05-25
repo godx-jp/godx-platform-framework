@@ -122,7 +122,7 @@ A **driver** is the in-process code that ships telemetry to a destination — se
 | File   | `file`   | stable | auto | bare-metal / VM, zero-budget, Laravel-style local file |
 | Stack  | `stack`  | stable | auto | fan-out: every log record to multiple sub-drivers (Laravel `stack` channel) |
 | OTLP   | `otlp`   | stable | opt-in (`_ "...drivers/otlp"`) | godx-platform-observability, Datadog, New Relic, any OTLP receiver |
-| CloudWatch | `cloudwatch` | stub | opt-in (`_ "...drivers/cloudwatch"`) | full impl in v0.7.0 (AWS ADOT) |
+| CloudWatch | `cloudwatch` | stable (v0.13.0) | opt-in (`_ "...drivers/cloudwatch"`) | AWS CloudWatch Logs (batched JSON via aws-sdk-go-v2) |
 
 Plus **named channels** (Laravel-style per-call selection — `obs.Channel("audit").Info(...)`): see [docs/modules/observability — channels](./docs/modules/observability.md#channels-laravel-style-named-loggers). Channels can be declared in Go (`NewChannel(name, cfg)`) or purely via env vars (`OBSERVABILITY_CHANNELS=audit,billing` + per-channel env keys) using `ChannelsFromEnv()`. Each channel has its own minimum level. The `stack` driver also accepts per-sub level: `OBSERVABILITY_STACK_DRIVERS=stdout:info,file:warn`.
 

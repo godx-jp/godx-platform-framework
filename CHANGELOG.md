@@ -4,6 +4,17 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-05-25
+
+Ships the `featureflag/` module — pluggable feature evaluation with optional per-eval cache.
+
+### Added
+
+- **`featureflag/` module** — `Evaluator.Enabled(ctx, flag, user, attrs)`.
+- **Drivers:** `config` (reads bool keys from config module), heavy stubs for `openfeature`, `launchdarkly`, `unleash`, `flagsmith`.
+- **Per-eval cache** — optional in-memory map via `FEATUREFLAG_CACHE`.
+- **`examples/featureflag/main.go`**, **`docs/modules/featureflag.md`**.
+
 ## [0.13.0] — 2026-05-25
 
 Ships the `scheduler/` module — cron-based job scheduling with overlap protection and distributed locks.
