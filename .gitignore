@@ -1,0 +1,19 @@
+.env
+.env.local
+.DS_Store
+
+# Go
+*.test
+*.out
+*.prof
+coverage.txt
+vendor/
+
+# Build artefacts
+/dist/
+/bin/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
