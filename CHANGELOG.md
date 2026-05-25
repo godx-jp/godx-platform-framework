@@ -4,6 +4,20 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-05-25
+
+**API freeze.** Laravel-parity roadmap complete. SemVer 1.x guarantees apply to exported symbols and documented env vars (see [VERSIONING.md](./docs/VERSIONING.md)).
+
+### Summary
+
+All planned modules shipped: `validation`, `httpclient`, `ratelimit`, `mail`, `notifications`, `queue`, `httpx`, `scheduler`, `featureflag`, `resilience`, CloudWatch Logs driver, `health`.
+
+### Changed
+
+- README module table — all modules **stable**.
+- [VERSIONING.md](./docs/VERSIONING.md) — v1.x SemVer policy; v0.x marked historical.
+- Fixed `examples/notifications` duplicate switch case build error.
+
 ## [0.14.1] — 2026-05-25
 
 Ships the `ratelimit/` module — token-bucket rate limiting with memory and Redis drivers plus HTTP middleware (v0.9.2 wave).

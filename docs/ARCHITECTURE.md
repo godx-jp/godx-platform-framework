@@ -237,4 +237,4 @@ The same pattern repeats for every future module — see [DRIVER_PATTERN](./DRIV
 | 0.12.x | `httpx` module | chi router + handler conventions; integrates pipeline / validation / ratelimit middleware |
 | 0.13.x | `cloudwatch` driver | full AWS ADOT impl (replaces the stub) |
 | 0.14.x | `health` module | `/healthz`, `/readyz`, dependency probes |
-| 1.0.0 | API freeze | SemVer guarantees for `1.x` |
+| **1.0.0** | **API freeze — Laravel-parity roadmap complete** | SemVer 1.x guarantees; all modules stable |

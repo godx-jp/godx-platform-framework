@@ -3,7 +3,7 @@
 > **Opinionated Go SDK by godx** — modular, OpenTelemetry-native, backend-agnostic.
 > Write once, swap backends (godx-platform-observability ↔ AWS CloudWatch ↔ Datadog ↔ …) by changing one env var.
 
-[![Version](https://img.shields.io/badge/version-0.14.0-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](./LICENSE)
 [![Maintainer](https://img.shields.io/badge/by-godx-black.svg)](#)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](https://go.dev)
@@ -107,7 +107,7 @@ go run .
 | `resilience` | stable (v0.13.2) | retry · circuit-breaker · timeout · bulkhead primitives |
 | `queue` | stable (v0.11.0) | memory · sqs · kafka · nats — Push/Dispatch, job lifecycle events |
 | `httpx` | stable (v0.12.0) | chi router + pipeline/validation/ratelimit middleware |
-| `observability/cloudwatch` | roadmap (v0.13) | full AWS CloudWatch driver for observability (stub today) |
+| `observability/cloudwatch` | stable (v1.0.0) | AWS CloudWatch Logs driver (replaces stub) |
 | `health` | stable (v0.14.0) | `/healthz`, `/readyz`, RegisterProbe dependency checks |
 
 Every module follows the [driver pattern](./docs/DRIVER_PATTERN.md): top-level package, public `driver/` contract, per-implementation `drivers/<name>/` package, optional `middleware/` sub-package.

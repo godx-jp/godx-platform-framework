@@ -16,13 +16,27 @@ Given `MAJOR.MINOR.PATCH`:
 | New module, new backend driver, new config var, new exported symbol | MINOR |
 | Bug fix, doc-only change, dependency bump (non-breaking) | PATCH |
 
-## v0.x caveat
+## v0.x history
 
-While `MAJOR == 0` (which we are in for the foreseeable future), the project is in active design. **Minor bumps may introduce breaking changes.** Consumers should:
+Releases `v0.1.0` through `v0.14.0` were active design. Minor bumps could introduce breaking changes — see [CHANGELOG.md](../CHANGELOG.md) per release.
 
-- Pin to an exact tag (`v0.1.0`), not a range.
-- Read the [CHANGELOG.md](../CHANGELOG.md) before upgrading.
-- Reach `1.0.0` will signal API freeze.
+## v1.x guarantees (from v1.0.0)
+
+**`MAJOR == 1`** signals API freeze for the Laravel-parity module set:
+
+| Change | Bump |
+|--------|------|
+| Breaking change to any **exported Go symbol** in a stable module | MAJOR (2.0.0) |
+| Breaking change to any **documented environment variable name** | MAJOR |
+| Breaking change to log/trace/metric attribute names | MAJOR |
+| New module, new backend driver, new config var, new exported symbol | MINOR |
+| Bug fix, doc-only change, dependency bump (non-breaking) | PATCH |
+
+Consumers may pin `@v1` or an exact tag (`v1.0.0`) and expect compatible upgrades within `1.x` PATCH and MINOR releases.
+
+## v0.x caveat (historical)
+
+While `MAJOR == 0`, minor bumps could introduce breaking changes. **Reach `1.0.0` signals API freeze** — achieved 2026-05-25.
 
 ## Support window
 

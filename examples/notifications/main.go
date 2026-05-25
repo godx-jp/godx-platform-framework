@@ -18,12 +18,10 @@ type user struct {
 }
 
 func (u user) RouteNotificationFor(channel string) string {
-	switch channel {
-	case "mail", ndriver.DriverMail:
+	if channel == "mail" || channel == ndriver.DriverMail {
 		return u.email
-	default:
-		return ""
 	}
+	return ""
 }
 
 type welcome struct{}
