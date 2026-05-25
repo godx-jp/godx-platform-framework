@@ -48,8 +48,9 @@ func (e entry) expired(now time.Time) bool {
 type impl struct {
 	prefix string
 
-	mu    sync.Mutex
-	items map[string]entry
+	mu     sync.Mutex
+	items  map[string]entry
+	closed bool
 
 	done     chan struct{}
 	wg       sync.WaitGroup
@@ -85,6 +86,9 @@ func (d *impl) Get(_ context.Context, key string) ([]byte, bool, error) {
 	k := d.full(key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.closed {
+		return nil, false, cdriver.ErrClosed
+	}
 	e, ok := d.items[k]
 	if !ok {
 		return nil, false, nil
@@ -100,6 +104,9 @@ func (d *impl) Put(_ context.Context, key string, val []byte, ttl time.Duration)
 	k := d.full(key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.closed {
+		return cdriver.ErrClosed
+	}
 	d.items[k] = newEntry(val, ttl)
 	return nil
 }
@@ -116,6 +123,9 @@ func (d *impl) Add(_ context.Context, key string, val []byte, ttl time.Duration)
 	k := d.full(key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.closed {
+		return false, cdriver.ErrClosed
+	}
 	if e, ok := d.items[k]; ok && !e.expired(time.Now()) {
 		return false, nil
 	}
@@ -127,6 +137,9 @@ func (d *impl) Forget(_ context.Context, key string) error {
 	k := d.full(key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.closed {
+		return cdriver.ErrClosed
+	}
 	delete(d.items, k)
 	return nil
 }
@@ -135,6 +148,9 @@ func (d *impl) Has(_ context.Context, key string) (bool, error) {
 	k := d.full(key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.closed {
+		return false, cdriver.ErrClosed
+	}
 	e, ok := d.items[k]
 	if !ok {
 		return false, nil
@@ -151,6 +167,9 @@ func (d *impl) Has(_ context.Context, key string) (bool, error) {
 func (d *impl) Flush(_ context.Context) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.closed {
+		return cdriver.ErrClosed
+	}
 	if d.prefix == "" {
 		d.items = make(map[string]entry)
 		return nil
@@ -175,6 +194,9 @@ func (d *impl) adjust(key string, delta int64) (int64, error) {
 	k := d.full(key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.closed {
+		return 0, cdriver.ErrClosed
+	}
 	now := time.Now()
 	var current int64
 	var expiresAt time.Time
@@ -198,6 +220,7 @@ func (d *impl) Shutdown(_ context.Context) error {
 	d.stopOnce.Do(func() { close(d.done) })
 	d.wg.Wait()
 	d.mu.Lock()
+	d.closed = true
 	d.items = nil
 	d.mu.Unlock()
 	return nil

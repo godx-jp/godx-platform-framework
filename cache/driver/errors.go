@@ -15,3 +15,9 @@ var ErrNotImplemented = errors.New("cache: driver not implemented")
 // ErrNotInteger is returned by Increment / Decrement when the value
 // already stored under the key cannot be parsed as a decimal int64.
 var ErrNotInteger = errors.New("cache: value is not an integer counter")
+
+// ErrClosed is returned by drivers when an operation is attempted on
+// a driver that has already had Shutdown called. Manager.Shutdown
+// disposes of every store, so this generally surfaces only in user
+// code that holds a *Store after the framework has shut down.
+var ErrClosed = errors.New("cache: driver is closed")

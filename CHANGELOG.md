@@ -4,6 +4,44 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-05-25
+
+Test-hardening patch. No public-API changes other than one new sentinel error in `cache/driver`. The release is driven by a fresh "audit every nook and cranny" pass over the cache + storage modules.
+
+### Fixed
+
+- **`cache/drivers/memory`** — calling `Put`, `Add`, `Forget`, `Increment`, `Decrement`, `Flush` (or `Has`) **after** `Shutdown` no longer panics with a `nil map` write. The driver now tracks a `closed` flag and returns the new `cdriver.ErrClosed` sentinel from every entry point. Affects only callers that hold a `*Store` past the framework's lifecycle (`Manager.Shutdown` always disposes of stores) — was a sharp edge nobody had hit yet but trivial to trigger from a test.
+
+### Added
+
+- **`cache/driver.ErrClosed`** — public sentinel for "this driver was shut down". Compatible with `errors.Is`.
+- **`cache/conformance_test.go`** — single, parametrised matrix that runs **every** Laravel-spirit scenario (round trip, TTL, Add atomicity, counters + concurrent counters, Pull, Flush scope, Flush isolation across two prefixes on the same backend, boundary values incl. empty/binary/1 MiB/UTF-8/512-byte keys, context cancellation) against `memory`, `file`, **and** live `redis`. New drivers shipped under `cache/drivers/...` must keep this suite green to be considered cache-compatible.
+- **`cache/edges_test.go`** — Manager + Module + Config edge cases: nil store rejection, empty-name rejection, missing default, `MustStore` panic semantics, idempotent `Shutdown`, sorted `Stores()`, double-init rejection, `AddStore` before `Module` diagnostic, `FromApp` pre-init error, global+per-store prefix isolation, partial-init cleanup on bad driver, hyphen/underscore/case normalisation in env names, default-not-in-`STORES` validation, JSON corruption surfacing through `GetJSON`, negative TTL clamped to "forever", concurrent `Default()` / `Store()` / `Stores()` under contention.
+- **`cache/driver/registry_test.go`** — `Register` panics on empty name and nil constructor, last `Register` wins, `Lookup` returns nil for missing, `Names()` sorted and includes auto-registered `memory`, `New()` returns helpful diagnostics for empty name and missing driver (hint at the `drivers/<name>` import path), every sentinel distinct under `errors.Is`. Coverage of the registry package went from **0 % to 100 %**.
+- **`cache/drivers/memory/lifecycle_test.go`** — idempotent `Shutdown`, every operation returns `ErrClosed` after `Shutdown`, sweeper goroutine actually exits (50 short-lived drivers must not leak goroutines), negative/zero TTL semantics, concurrent readers cannot mutate cached values via the returned slice.
+- **`cache/drivers/file/lifecycle_test.go`** — corrupt envelope is recovered (broken file removed, next `Put` succeeds), temporary `.cache-*` write artefacts are cleaned, 32 concurrent writers × 50 ops do not corrupt a shared key, `Flush` over a deleted root is a noop, TTL is preserved across `Increment` of an already-expiring key.
+- **`storage/drivers/local/edges_test.go`** — absolute-key inputs (`/etc/passwd`) stay sandboxed under the configured root, backslashes normalised to forward slashes (Laravel parity), `Exists` on a directory returns false, `Delete`/`Attributes` on missing keys return `stordriver.ErrNotFound`, `List` on empty/missing/regular-file prefixes behaves correctly, default visibility from `Spec` honoured, idempotent `Shutdown`, 16 × 25 concurrent writers across distinct keys, 4 MiB round trip, URL encoding preserves slashes while escaping spaces.
+- **`storage/drivers/memory/edges_test.go`** — write-after-`Close` errors, empty/whitespace/`/`/backslash key rejection, metadata + content-type + cache-control + visibility round trip, returned metadata maps are defensive copies (mutation does not leak into the cache), 32 × 100 concurrent writers, default visibility from `Spec` honoured, overwrite replaces every field, traversal segments collapsed before storage, idempotent `Shutdown`.
+
+### Coverage
+
+| Package | Before | After |
+| --- | --- | --- |
+| `cache` | 73.7 % | **84.4 %** |
+| `cache/driver` | 0 % | **100 %** |
+| `cache/drivers/memory` | 90.2 % | **91.6 %** |
+| `cache/drivers/file` | 79.2 % | **82.5 %** |
+| `storage/drivers/local` | 79.2 % | **85.8 %** |
+| `storage/drivers/memory` | 82.2 % | **95.0 %** |
+
+Heavy-driver coverage (`redis`, `gcs`, `azure`) is unchanged at the unit level — those branches are still exercised exclusively under `-tags integration` against the corresponding emulators.
+
+### Verification
+
+- `go test -race -count=5 ./...` — all packages green over five consecutive runs (catches sleep-based flakes).
+- `go test -race -count=1 -tags integration ./cache/drivers/redis/ ./storage/drivers/internal/s3core/` — live redis + MinIO regression.
+- `go vet ./...` and `go vet -tags integration ./...` clean.
+
 ## [0.7.0] — 2026-05-25
 
 New module — Laravel-faithful **`cache`** with three drivers: `memory`, `file`, `redis`. By explicit user direction, database-backed cache is out of scope.
