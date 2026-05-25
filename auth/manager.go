@@ -10,15 +10,19 @@ import (
 	adriver "github.com/godx-jp/godx-platform-framework/auth/driver"
 )
 
-// Manager owns named auth guards.
+// Manager owns named auth guards and per-guard credential resolvers.
 type Manager struct {
-	mu     sync.RWMutex
-	guards map[string]adriver.Guard
-	def    string
+	mu        sync.RWMutex
+	guards    map[string]adriver.Guard
+	resolvers map[string]CredentialResolver
+	def       string
 }
 
 func NewManager() *Manager {
-	return &Manager{guards: map[string]adriver.Guard{}}
+	return &Manager{
+		guards:    map[string]adriver.Guard{},
+		resolvers: map[string]CredentialResolver{},
+	}
 }
 
 func (m *Manager) AddGuard(name string, g adriver.Guard) error {
@@ -67,6 +71,35 @@ func (m *Manager) Guard(name string) (adriver.Guard, error) {
 		return nil, fmt.Errorf("auth: guard %q not registered", name)
 	}
 	return g, nil
+}
+
+// SetResolver binds a credential resolver to a registered guard name.
+func (m *Manager) SetResolver(name string, resolve CredentialResolver) error {
+	if name == "" || resolve == nil {
+		return fmt.Errorf("auth: SetResolver: name and resolver required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.guards[name]; !ok {
+		return fmt.Errorf("auth: SetResolver(%q): guard not registered", name)
+	}
+	m.resolvers[name] = resolve
+	return nil
+}
+
+// Resolver returns the credential resolver for a guard.
+func (m *Manager) Resolver(name string) (CredentialResolver, error) {
+	m.mu.RLock()
+	resolve, ok := m.resolvers[name]
+	m.mu.RUnlock()
+	if ok {
+		return resolve, nil
+	}
+	g, err := m.Guard(name)
+	if err != nil {
+		return nil, err
+	}
+	return ResolverForGuard(g.Name(), "X-API-Key")
 }
 
 func (m *Manager) Names() []string {

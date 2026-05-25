@@ -52,6 +52,13 @@ func initFromConfig(ctx context.Context, app *framework.App, cfg Config) error {
 		if err := mgr.AddGuard(name, g); err != nil {
 			return err
 		}
+		resolve, err := ResolverForGuard(gc.Driver, gc.Spec.Header)
+		if err != nil {
+			return fmt.Errorf("auth: resolver for guard %q: %w", name, err)
+		}
+		if err := mgr.SetResolver(name, resolve); err != nil {
+			return err
+		}
 	}
 	if err := mgr.SetDefault(cfg.Default); err != nil {
 		return err

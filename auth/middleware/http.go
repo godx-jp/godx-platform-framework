@@ -41,11 +41,7 @@ func effectiveGuardName(mgr *auth.Manager, explicit string) string {
 }
 
 func resolveForGuard(mgr *auth.Manager, name string) (auth.CredentialResolver, error) {
-	g, err := mgr.Guard(name)
-	if err != nil {
-		return nil, err
-	}
-	return auth.ResolverForGuard(g.Name(), "X-API-Key")
+	return mgr.Resolver(name)
 }
 
 // Authenticate resolves credentials and attaches the Principal to context.
