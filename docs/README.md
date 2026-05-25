@@ -10,6 +10,7 @@ Index for the godx-platform-framework documentation.
 ## Conventions (applies to every module)
 
 - **[DRIVER_PATTERN](./DRIVER_PATTERN.md)** — the shared swappable-backend convention. Read once, applies to observability, future storage, cache, queue.
+- **[SHARED_INFRA.md](./SHARED_INFRA.md)** — one Redis for cache + ratelimit (Laravel-style prefixes), module composition, use cases, testing bar.
 - **[CONFIGURATION](./CONFIGURATION.md)** — full environment variable reference.
 - **[VERSIONING](./VERSIONING.md)** — SemVer policy and compatibility guarantees.
 

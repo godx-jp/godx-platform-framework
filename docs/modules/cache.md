@@ -141,14 +141,10 @@ Selecting `redis` without the blank import fails at module init with a hint that
 CACHE_STORES=cache
 CACHE_STORE_CACHE_DRIVER=redis
 CACHE_STORE_CACHE_URL=redis://:secret@127.0.0.1:6379/0
-# or component-wise:
-# CACHE_STORE_CACHE_ADDRESS=127.0.0.1:6379
-# CACHE_STORE_CACHE_USERNAME=default
-# CACHE_STORE_CACHE_PASSWORD=secret
-# CACHE_STORE_CACHE_DB=0
-# CACHE_STORE_CACHE_TLS=false
 # CACHE_STORE_CACHE_PREFIX=cache:        # per-store prefix
 ```
+
+**Same Redis as ratelimit?** Yes — use the same URL, different prefix. See [SHARED_INFRA.md](../SHARED_INFRA.md#one-redis-server-for-everything-recommended).
 
 `Put` maps to `SET` (with `PX` when TTL > 0). `Add` is `SET NX`. `Increment`/`Decrement` use native `INCRBY`/`DECRBY` for full atomicity even under heavy contention. `Flush` walks the namespace with `SCAN` + `UNLINK` when a prefix is set, so multi-tenant Redis instances stay safe — only the keys belonging to this store are removed. Without a prefix, `Flush` falls back to `FLUSHDB` against the selected logical DB.
 
