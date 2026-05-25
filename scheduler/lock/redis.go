@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -91,30 +92,45 @@ func (r *Redis) lockKey(key string) string { return r.prefix + key }
 // delete the lock it actually holds — never one that another replica took
 // over after this lock expired.
 func (r *Redis) TryAcquire(ctx context.Context, key string) (func() error, bool, error) {
+	// Delegate to TryAcquireLease so there is a single acquisition + renewal
+	// implementation; callers of TryAcquire simply discard the lost channel.
+	release, _, ok, err := r.TryAcquireLease(ctx, key)
+	return release, ok, err
+}
+
+// TryAcquireLease behaves like TryAcquire but also returns a channel that is
+// closed exactly once when the renew loop can no longer guarantee ownership
+// (a renew error, or a value-checked renew that finds the key expired or
+// taken over by another replica). The holder can select on this channel to
+// abort in-flight work and uphold the OnOneServer guarantee.
+func (r *Redis) TryAcquireLease(ctx context.Context, key string) (func() error, <-chan struct{}, bool, error) {
 	lockKey := r.lockKey(key)
 	suffix, err := randomToken()
 	if err != nil {
-		return nil, false, fmt.Errorf("scheduler/lock: generate lock token: %w", err)
+		return nil, nil, false, fmt.Errorf("scheduler/lock: generate lock token: %w", err)
 	}
 	token := r.owner + ":" + suffix
 	ok, err := r.client.SetNX(ctx, lockKey, token, r.ttl).Result()
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	if !ok {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
 	stop := make(chan struct{})
-	go r.renewLoop(stop, lockKey, token)
+	lost := make(chan struct{})
+	var lostOnce sync.Once
+	signalLost := func() { lostOnce.Do(func() { close(lost) }) }
+	go r.renewLoop(stop, lockKey, token, signalLost)
 	return func() error {
 		close(stop)
 		// Compare-and-delete: only remove the key when it still holds our
 		// token, so we never delete a lock another replica now owns.
 		return releaseScript.Run(context.Background(), r.client, []string{lockKey}, token).Err()
-	}, true, nil
+	}, lost, true, nil
 }
 
-func (r *Redis) renewLoop(stop <-chan struct{}, lockKey, token string) {
+func (r *Redis) renewLoop(stop <-chan struct{}, lockKey, token string, signalLost func()) {
 	interval := r.ttl / 3
 	if interval < time.Second {
 		interval = time.Second
@@ -132,16 +148,17 @@ func (r *Redis) renewLoop(stop <-chan struct{}, lockKey, token string) {
 			// expired or was taken over by another replica) means this
 			// holder no longer owns the lock, yet the job is still running —
 			// so the OnOneServer guarantee is temporarily lost. We surface it
-			// loudly for operators. Cancelling the in-flight job would require
-			// threading a cancel signal through scheduler.runJob; until that
-			// is wired, the residual risk is logged here.
+			// loudly for operators AND signal the lost channel so the holder
+			// (scheduler.runJob) can cancel the in-flight job.
 			switch {
 			case err != nil:
 				slog.Warn("scheduler/lock: redis lock renew failed; lock may expire mid-job",
 					"key", lockKey, "error", err)
+				signalLost()
 			case res == int64(0):
 				slog.Warn("scheduler/lock: redis lock lost during job (key expired or stolen); OnOneServer no longer guaranteed",
 					"key", lockKey)
+				signalLost()
 			}
 		}
 	}

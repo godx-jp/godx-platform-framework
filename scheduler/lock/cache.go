@@ -58,20 +58,40 @@ func NewCache(opts CacheOptions) (*Cache, error) {
 // token, so a holder that has lost the lock cannot re-extend one another
 // replica now owns.
 func (c *Cache) TryAcquire(ctx context.Context, key string) (func() error, bool, error) {
+	// Delegate to TryAcquireLease so there is a single acquisition + renewal
+	// implementation; callers of TryAcquire simply discard the lost channel.
+	release, _, ok, err := c.TryAcquireLease(ctx, key)
+	return release, ok, err
+}
+
+// TryAcquireLease behaves like TryAcquire but also returns a channel that is
+// closed exactly once when the renew loop can no longer guarantee ownership
+// (a value-checked Renew error: the TTL expired or another replica took the
+// lock over). The holder can select on this channel to abort in-flight work
+// and uphold the OnOneServer guarantee.
+//
+// When the store does not implement RenewableStore (or ttl <= 0) there is no
+// renewer, so the lost channel is never closed for the life of the lock; the
+// release closure stops the (absent) renewer and forgets the key as before.
+func (c *Cache) TryAcquireLease(ctx context.Context, key string) (func() error, <-chan struct{}, bool, error) {
 	lockKey := c.prefix + key
 	suffix, err := randomToken()
 	if err != nil {
-		return nil, false, fmt.Errorf("scheduler/lock: generate lock token: %w", err)
+		return nil, nil, false, fmt.Errorf("scheduler/lock: generate lock token: %w", err)
 	}
 	token := append(append([]byte(nil), c.owner...), ':')
 	token = append(token, suffix...)
 	added, err := c.store.Add(ctx, lockKey, token, c.ttl)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	if !added {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
+
+	lost := make(chan struct{})
+	var lostOnce sync.Once
+	signalLost := func() { lostOnce.Do(func() { close(lost) }) }
 
 	var stopRenew sync.WaitGroup
 	stop := make(chan struct{})
@@ -96,13 +116,12 @@ func (c *Cache) TryAcquire(ctx context.Context, key string) (func() error, bool,
 					// expired or another replica took it over via a
 					// value-checked Renew) while the job is still running, so
 					// the OnOneServer guarantee is temporarily broken. We log
-					// it for operators rather than silently dropping it.
-					// Cancelling the in-flight job would require threading a
-					// cancel signal through scheduler.runJob; until that is
-					// wired the residual risk is surfaced here.
+					// it for operators AND signal the lost channel so the
+					// holder (scheduler.runJob) can cancel the in-flight job.
 					if err := renewer.Renew(context.Background(), lockKey, token, c.ttl); err != nil {
 						slog.Warn("scheduler/lock: cache lock renew failed; lock may expire mid-job, OnOneServer no longer guaranteed",
 							"key", lockKey, "error", err)
+						signalLost()
 					}
 				}
 			}
@@ -113,5 +132,5 @@ func (c *Cache) TryAcquire(ctx context.Context, key string) (func() error, bool,
 		close(stop)
 		stopRenew.Wait()
 		return c.store.Forget(ctx, lockKey)
-	}, true, nil
+	}, lost, true, nil
 }

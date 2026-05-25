@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/godx-jp/godx-platform-framework/events"
@@ -108,17 +109,17 @@ func (s *Scheduler) Cron(expr string) *Schedule {
 
 // Schedule is a fluent builder for one cron entry.
 type Schedule struct {
-	sched            *Scheduler
-	expr             string
-	withoutOverlap   bool
-	onOneServer      bool
-	timeout          time.Duration
-	environments     []string
-	betweenStart     string
-	betweenEnd       string
-	when             func() bool
-	unless           func() bool
-	runOnQueue       string
+	sched          *Scheduler
+	expr           string
+	withoutOverlap bool
+	onOneServer    bool
+	timeout        time.Duration
+	environments   []string
+	betweenStart   string
+	betweenEnd     string
+	when           func() bool
+	unless         func() bool
+	runOnQueue     string
 }
 
 // WithoutOverlapping skips a run when the previous invocation is still active.
@@ -239,19 +240,34 @@ func (s *Scheduler) runJob(def jobDef) {
 		return
 	}
 
+	// lockLost is closed by a leased distributed lock when the lease is lost
+	// mid-run (renewal failed or the key expired/was stolen). It stays nil for
+	// memory locks and dist locks that do not implement lock.LeasedMutex.
+	var lockLost <-chan struct{}
 	if def.onOneServer {
 		if s.distLock == nil {
 			s.emit(ctx, EventSkipped, def.name, "lock_misconfigured", nil)
 			s.recordHealth(def.name, EventSkipped, "lock_misconfigured")
 			return
 		}
-		release, ok, err := s.distLock.TryAcquire(ctx, def.name)
-		if err != nil || !ok {
-			s.emit(ctx, EventSkipped, def.name, "lock_busy", err)
-			s.recordHealth(def.name, EventSkipped, "lock_busy")
-			return
+		if leased, ok := s.distLock.(lock.LeasedMutex); ok {
+			release, lost, acquired, err := leased.TryAcquireLease(ctx, def.name)
+			if err != nil || !acquired {
+				s.emit(ctx, EventSkipped, def.name, "lock_busy", err)
+				s.recordHealth(def.name, EventSkipped, "lock_busy")
+				return
+			}
+			lockLost = lost
+			defer func() { _ = release() }()
+		} else {
+			release, ok, err := s.distLock.TryAcquire(ctx, def.name)
+			if err != nil || !ok {
+				s.emit(ctx, EventSkipped, def.name, "lock_busy", err)
+				s.recordHealth(def.name, EventSkipped, "lock_busy")
+				return
+			}
+			defer func() { _ = release() }()
 		}
-		defer func() { _ = release() }()
 	}
 
 	if def.withoutOverlap {
@@ -272,9 +288,40 @@ func (s *Scheduler) runJob(def jobDef) {
 	var cancel context.CancelFunc
 	if timeout > 0 {
 		runCtx, cancel = context.WithTimeout(ctx, timeout)
+	} else if lockLost != nil {
+		// A leased lock can be lost mid-run even without a timeout, so we need
+		// a cancellable context to abort the job when the lease drops.
+		runCtx, cancel = context.WithCancel(ctx)
 	}
 	if cancel != nil {
 		defer cancel()
+	}
+
+	// Watch the lease: if it is lost while the job runs, cancel runCtx so the
+	// callback observes ctx.Done(), and record the run as skipped with reason
+	// "lock_lost". The watcher always exits via one of the two select arms
+	// (lease lost, or the run finished and cancel() fired through defer), so
+	// there is no goroutine leak. lockLostFired guards against the lost-event
+	// being emitted twice and lets the post-run path know cancellation came
+	// from a lost lease rather than a normal timeout.
+	var lockLostFired atomic.Bool
+	if lockLost != nil {
+		watchDone := make(chan struct{})
+		defer func() {
+			cancel()
+			<-watchDone
+		}()
+		go func() {
+			defer close(watchDone)
+			select {
+			case <-lockLost:
+				lockLostFired.Store(true)
+				cancel()
+				s.emit(ctx, EventSkipped, def.name, "lock_lost", nil)
+				s.recordHealth(def.name, EventSkipped, "lock_lost")
+			case <-runCtx.Done():
+			}
+		}()
 	}
 
 	s.runWG.Add(1)
@@ -295,6 +342,13 @@ func (s *Scheduler) runJob(def jobDef) {
 
 	if s.onRun != nil {
 		s.onRun(def.name, err)
+	}
+	// If the lease was lost, the watcher already emitted EventSkipped/"lock_lost"
+	// and recorded health; the callback's (likely context-cancelled) result is
+	// reported to onRun above but must not also produce a failed/finished event,
+	// which would be a misleading double-emit for the same run.
+	if lockLostFired.Load() {
+		return
 	}
 	if err != nil {
 		s.emit(runCtx, EventFailed, def.name, err.Error(), err)

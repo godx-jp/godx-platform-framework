@@ -102,6 +102,24 @@ type Mutex interface {
 }
 ```
 
+An **optional** extension lets a distributed lock surface a lost lease:
+
+```go
+// LeasedMutex is optionally implemented by a Mutex whose held lock can be
+// lost while in use (lease expiry / theft). TryAcquireLease behaves like
+// TryAcquire but also returns a channel closed when ownership can no longer
+// be guaranteed, so the holder can abort work.
+type LeasedMutex interface {
+    Mutex
+    TryAcquireLease(ctx context.Context, key string) (release func() error, lost <-chan struct{}, ok bool, err error)
+}
+```
+
+`lock.Cache` and `lock.Redis` implement `LeasedMutex`; `lock.Memory` does
+not (an in-process mutex cannot be lost out from under its holder, so it
+stays a plain `Mutex`). The interface is additive — existing `Mutex`
+implementations and callers are unaffected.
+
 `WithoutOverlapping` always uses an auto-created `lock.Memory`.
 `OnOneServer` uses whatever `Mutex` was supplied via `Options.DistributedLock`
 or `WithDistributedLock`.
@@ -129,8 +147,10 @@ type RenewableStore interface {
 
 `lock.Cache` and `lock.Redis` both run a background renewal loop
 (interval = `TTL/3`, floored at 1s) that re-extends the lock while the
-job runs; the `release` callback stops the loop and releases the key.
-`lock.Cache` only renews when its store implements `RenewableStore`.
+job runs; the `release` callback stops the loop and releases the key. When
+the renewal can no longer guarantee ownership, the loop also closes the
+`lost` channel from `TryAcquireLease` (see below). `lock.Cache` only renews
+(and can only lose the lease) when its store implements `RenewableStore`.
 `lock.NewRedisStore(client)` adapts a `*redis.Client` to
 `CacheStore`/`RenewableStore` so it can be passed to
 `scheduler.ModuleWithConfig`.
@@ -159,17 +179,35 @@ an effective lock value. This makes release and renewal **owner-checked**:
   callers needing strict compare-and-delete on release should use the
   direct `lock.Redis` lock (`NewRedis`).
 
-#### Renewal-failure behavior
+#### Renewal-failure behavior — losing the lease cancels the job
 
 When a renewal returns an error or a result indicating the key was lost
 (expired or taken over by another replica), the lock no longer holds even
-though the job is still running, so the `OnOneServer` guarantee is
-temporarily broken. Both adapters now **log a warning via `log/slog`**
-(rather than silently discarding the result) so operators can detect and
-alert on it. The in-flight job is **not** cancelled — wiring a cancel
-signal through `runJob` is a deliberate follow-up; the current behavior is
-detect-and-log, documented inline with `// SECURITY:` comments in the
-lock code.
+though the job is still running, so the `OnOneServer` guarantee would be
+broken. The adapters respond on two fronts:
+
+- They **log a warning via `log/slog`** so operators can detect and alert
+  on it (documented inline with `// SECURITY:` comments in the lock code).
+- They **close the `lost` channel** returned by `TryAcquireLease` exactly
+  once (guarded by a `sync.Once`, so `release` never double-closes it).
+
+When a job uses `OnOneServer` with a distributed lock that implements
+`lock.LeasedMutex` (both `lock.Cache` and `lock.Redis` do), `runJob`
+acquires via `TryAcquireLease` and watches the `lost` channel. **If the
+lease is lost mid-run, the job's context is cancelled** — the callback
+observes `ctx.Done()` and should return promptly — and the run is recorded
+as **skipped with detail `lock_lost`** (emitting `schedule.skipped`). To
+make this possible the run always uses a cancellable context when a leased
+lock is held, even when no `Timeout`/`DefaultTimeout` is configured. The
+watcher goroutine always exits (the lease is lost, or the run finishes and
+the deferred `cancel()` fires), so there is no goroutine leak, and the
+post-run path suppresses the otherwise-misleading `failed`/`finished`
+double-emit for that same run (the callback's cancellation error is still
+delivered to `Options.OnRun`).
+
+Memory locks and distributed locks that do **not** implement
+`LeasedMutex` keep the prior behavior: the job is not cancelled on lease
+loss (a memory lock cannot lose its lease at all).
 
 ### Wiring `OnOneServer` via the module
 
@@ -194,7 +232,7 @@ Lifecycle events on `events.Bus` (constants `scheduler.EventStarted` etc.):
 | `EventStarted` | `schedule.started` | Just before the callback runs |
 | `EventFinished` | `schedule.finished` | Callback returned nil (detail = duration in ms) |
 | `EventFailed` | `schedule.failed` | Callback returned an error |
-| `EventSkipped` | `schedule.skipped` | A filter/lock prevented the run (detail names the reason: `maintenance`, `environment`, `between`, `when`, `unless`, `lock_misconfigured`, `lock_busy`, `overlap`) |
+| `EventSkipped` | `schedule.skipped` | A filter/lock prevented the run, or a held lease was lost mid-run (detail names the reason: `maintenance`, `environment`, `between`, `when`, `unless`, `lock_misconfigured`, `lock_busy`, `overlap`, `lock_lost`) |
 
 Event metadata: `job`, optional `detail`, optional `error`.
 
