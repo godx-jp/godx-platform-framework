@@ -173,10 +173,11 @@ The same pattern repeats for every future module — see [DRIVER_PATTERN](./DRIV
 | 0.1.x | initial scaffold | first cut of framework + observability (deprecated naming) |
 | 0.2.x | naming cleanup | env-var rename to full `OBSERVABILITY_*`; `Backend` → `Driver` |
 | 0.3.x | multi-channel | `stack` driver (Laravel fan-out), named channels (`obs.Channel("audit")`) |
-| 0.4.x | **layout standardisation** | per-driver subpackages, `<module>/driver` registry, `<module>/middleware` sub-package, opt-in heavy drivers |
-| 0.5.x | `cloudwatch` driver | AWS ADOT exporters; configurable correlation header |
-| 0.6.x | `storage` module | drivers: local · s3 · gcs · azure · minio |
-| 0.7.x | `cache` module | drivers: memory · redis · memcached |
-| 0.8.x | `queue` module | drivers: in-memory · sqs · kafka · nats |
-| 0.9.x | `httpx` module | chi router + handler conventions |
+| 0.4.x | layout standardisation | per-driver subpackages, `<module>/driver` registry, `<module>/middleware` sub-package, opt-in heavy drivers |
+| 0.5.x | **channel maturity** | per-channel level filter, env-driven channels (`ChannelsFromEnv()`), per-sub stack level (`stdout:info,file:warn`) — Laravel `config/logging.php` parity |
+| 0.6.x | `cloudwatch` driver | AWS ADOT exporters; configurable correlation header |
+| 0.7.x | `storage` module | drivers: local · s3 · gcs · azure · minio |
+| 0.8.x | `cache` module | drivers: memory · redis · memcached |
+| 0.9.x | `queue` module | drivers: in-memory · sqs · kafka · nats |
+| 0.10.x | `httpx` module | chi router + handler conventions |
 | 1.0.0 | API freeze | SemVer guarantees for `1.x` |

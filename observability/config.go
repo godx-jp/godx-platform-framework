@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/godx-jp/godx-platform-framework/observability/driver"
 )
 
 // Driver identifiers recognised by [LoadConfigFromEnv].
@@ -18,7 +20,7 @@ const (
 	DriverFile       = "file"       // local file with optional rotation; bare-metal / VM (auto-registered)
 	DriverStack      = "stack"      // fan-out: every log record goes to N sub-drivers — Laravel `stack` channel (auto-registered)
 	DriverOTLP       = "otlp"       // OTLP gRPC/HTTP; godx-platform-observability, Datadog, New Relic — opt-in (blank import drivers/otlp)
-	DriverCloudWatch = "cloudwatch" // AWS CloudWatch Logs/Metrics + X-Ray — opt-in (blank import drivers/cloudwatch); stub in 0.4.x, full in 0.5.0
+	DriverCloudWatch = "cloudwatch" // AWS CloudWatch Logs/Metrics + X-Ray — opt-in (blank import drivers/cloudwatch); stub in 0.4.x–0.5.x, full in 0.6.0
 )
 
 // Config controls observability bootstrap. The framework module loads it
@@ -145,16 +147,10 @@ func getEnv(key, def string) string {
 }
 
 func parseLogLevel(s string) slog.Level {
-	switch strings.ToLower(s) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn", "warning":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
+	if lvl, ok := driver.ParseLogLevel(s); ok {
+		return lvl
 	}
+	return slog.LevelInfo
 }
 
 func parseFloat(s string, def float64) float64 {

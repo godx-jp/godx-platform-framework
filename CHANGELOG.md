@@ -4,6 +4,73 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-25
+
+Channel-system maturity release — closes the Laravel `config/logging.php` parity gap. All additions are **backward-compatible**; no consumer code change is required to upgrade from 0.4.0.
+
+### Added — per-channel level filter
+
+- `Config.LogLevel` on a `NewChannel(name, cfg)` config is now formally documented as the per-channel minimum level (Laravel `'level' => 'warning'`). The driver's `slog.Handler` enforces it, so records below threshold never reach the wire. Verified end-to-end by `TestChannel_PerChannelLevelFilter`.
+
+### Added — env-driven channels (zero Go code)
+
+- `observability.ChannelsFromEnv()` — new framework module that reads `OBSERVABILITY_CHANNELS` (comma list) and, for each name X, builds a `Config` from `OBSERVABILITY_CHANNEL_<X>_*` env vars, then registers the channel on the primary provider. Mirrors Laravel `config/logging.php` for projects that prefer 12-factor over Go code.
+- `observability.LoadChannelConfigFromEnv(name)` — exported helper that returns the per-channel `Config`. Same field shape as `LoadConfigFromEnv` but with the `OBSERVABILITY_CHANNEL_<NAME>_` prefix; OTLP keys are namespaced (the global `OTEL_EXPORTER_OTLP_*` cannot be repeated per-channel).
+- `observability.ChannelsEnvVar` constant (`"OBSERVABILITY_CHANNELS"`).
+- Channel name normalisation: case-insensitive; hyphens/spaces convert to underscores. `audit-trail` ⇒ `OBSERVABILITY_CHANNEL_AUDIT_TRAIL_*`.
+- Startup validation: reserved name (`primary`), duplicate names, wrong wiring order (`ChannelsFromEnv()` before `Module`), unknown driver, and any per-channel construction error all fail fast with a clear message.
+- Wiring (one line, safe to leave in `main` permanently — no-op when `OBSERVABILITY_CHANNELS` is unset):
+
+  ```go
+  app := framework.New("svc", "1.0.0").
+      Use(observability.Module).
+      Use(observability.ChannelsFromEnv())
+  ```
+
+### Added — stack driver per-sub minimum level
+
+- `OBSERVABILITY_STACK_DRIVERS` now accepts an inline `name:level` syntax per entry — Laravel "info to stdout, warn+ to file" pattern without defining named channels:
+
+  ```bash
+  OBSERVABILITY_DRIVER=stack
+  OBSERVABILITY_STACK_DRIVERS=stdout:info,file:warn
+  OBSERVABILITY_LOG_FILE_PATH=/var/log/app.log
+  ```
+
+  Without `:level` the sub-driver inherits the parent's `OBSERVABILITY_LOG_LEVEL` (existing behaviour). Unknown levels fail at construction with a clear error pointing at the offending sub.
+
+### Added — `driver.ParseLogLevel` helper
+
+- New exported helper `driver.ParseLogLevel(s string) (slog.Level, bool)` in `observability/driver` — single source of truth for the four supported levels (`debug` · `info` · `warn`/`warning` · `error`). Used internally by the observability config loader and the stack driver; available to third-party drivers via the public `driver` package.
+
+### Tests
+
+Nine new tests cover the additions:
+
+- `TestStackDriver_PerSubLevelFilter` — fan-out filter respects per-sub min level.
+- `TestStackDriver_PerSubLevel_RejectsUnknownLevel` — bad level fails at construction.
+- `TestChannel_PerChannelLevelFilter` — `Config.LogLevel` drops records below threshold on a named channel.
+- `TestChannelsFromEnv_RegistersDeclaredChannels` — full env path, per-channel level enforced.
+- `TestChannelsFromEnv_NoopWhenUnset` — empty `OBSERVABILITY_CHANNELS` registers nothing.
+- `TestChannelsFromEnv_RejectsPrimaryReserved` — `primary` cannot be listed.
+- `TestChannelsFromEnv_RejectsDuplicate` — same name listed twice fails.
+- `TestChannelsFromEnv_OrderingErrorWhenBeforeModule` — must be `.Use`d after `Module`.
+- `TestLoadChannelConfigFromEnv_NormalisesName` — hyphenated channel names map to upper-case underscore segments.
+
+### Changed (non-breaking)
+
+- Roadmap: cloudwatch driver pushed 0.5.x → 0.6.x, storage 0.6.x → 0.7.x, cache → 0.8.x, queue → 0.9.x, httpx → 0.10.x. v0.5.x is dedicated to nailing Laravel `config/logging.php` parity.
+- `observability.parseLogLevel` (internal) now delegates to `driver.ParseLogLevel` — single canonical implementation.
+- `cloudwatch.ErrNotImplemented` and its package doc reference the new 0.6.0 target.
+
+### Migration
+
+None required. Existing wiring keeps working:
+
+- `OBSERVABILITY_STACK_DRIVERS=stdout,file` continues to inherit `OBSERVABILITY_LOG_LEVEL` for both.
+- `NewChannel(name, cfg)` is unchanged.
+- `ChannelsFromEnv()` is opt-in — add it only when you want declarative channels.
+
 ## [0.4.0] — 2026-05-25
 
 This release is a **structural breaking change** to put the framework on the same layout convention as `go-kit`, `OpenTelemetry Go`, `kratos`, and the team's own `go-common` — one package per concern at the root, public driver contract under `<module>/driver/`, built-in driver implementations split into one package each under `<module>/drivers/<name>/`, optional integration sub-packages (e.g. `<module>/middleware/`). The shape is fixed so that every future module (storage, cache, queue, httpx, ...) slots in identically.

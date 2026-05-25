@@ -78,7 +78,7 @@ If you call `Info` (no `Context` suffix), trace and correlation IDs are skipped 
 | `file` | stable | auto | slog JSON to a local file with Laravel-style rotation (`none` / `daily` / `size`), gzip, retention |
 | `stack` | stable | auto | fan-out: every log record goes to N sub-drivers — Laravel `stack` channel |
 | `otlp` | stable | **opt-in** (`_ "...drivers/otlp"`) | slog JSON to stdout + OTLP gRPC/HTTP for traces + metrics |
-| `cloudwatch` | stub (0.4.x), full (0.5.0) | **opt-in** (`_ "...drivers/cloudwatch"`) | AWS CloudWatch Logs/Metrics + X-Ray |
+| `cloudwatch` | stub (0.4.x–0.5.x), full (0.6.0) | **opt-in** (`_ "...drivers/cloudwatch"`) | AWS CloudWatch Logs/Metrics + X-Ray |
 
 For why some drivers are auto-registered and others opt-in, see [DRIVER_PATTERN — Light vs heavy drivers](../DRIVER_PATTERN.md#light-vs-heavy-drivers).
 
@@ -144,21 +144,31 @@ Use when you want every log record to land in more than one place — for exampl
 The stack driver instantiates each named sub-driver from the same Spec, dispatches every `slog.Record` to all of them, and joins their errors. Traces and metrics use the **first sub-driver only** — duplicating a span across exporters would produce double-counted distributed traces.
 
 ```bash
-# Container + local safety net
+# Container + local safety net — every record to both
 OBSERVABILITY_DRIVER=stack
 OBSERVABILITY_STACK_DRIVERS=stdout,file
 OBSERVABILITY_LOG_FILE_PATH=/var/log/app/app.log
 ```
 
+**Per-sub minimum level** (`name:level` inline syntax — Laravel "info to stdout, warn+ to file" pattern):
+
+```bash
+OBSERVABILITY_DRIVER=stack
+OBSERVABILITY_STACK_DRIVERS=stdout:info,file:warn
+OBSERVABILITY_LOG_FILE_PATH=/var/log/app/app.log
+```
+
+`info` records land only in stdout; `warn` and above land in both. Omit `:level` to inherit the parent's `OBSERVABILITY_LOG_LEVEL`. Valid levels: `debug` · `info` · `warn` (or `warning`) · `error`. Unknown levels are rejected at construction with a clear error.
+
 If `OBSERVABILITY_STACK_DRIVERS` includes a heavy driver (e.g. `otlp`), the consumer must still blank-import that driver package.
 
-### cloudwatch (stub in 0.4.x — opt-in)
+### cloudwatch (stub in 0.4.x–0.5.x — opt-in)
 
 ```go
 import _ "github.com/godx-jp/godx-platform-framework/observability/drivers/cloudwatch"
 ```
 
-Returns `cloudwatch.ErrNotImplemented` until 0.5.0. Designed as opt-in from day one so the future AWS-SDK-backed implementation is a drop-in upgrade. Tracked env vars: `AWS_REGION`, `OBSERVABILITY_CLOUDWATCH_LOG_GROUP`.
+Returns `cloudwatch.ErrNotImplemented` until 0.6.0. Designed as opt-in from day one so the future AWS-SDK-backed implementation is a drop-in upgrade. Tracked env vars: `AWS_REGION`, `OBSERVABILITY_CLOUDWATCH_LOG_GROUP`.
 
 ## HTTP middleware
 
@@ -206,13 +216,21 @@ cid := observability.CorrelationIDFromContext(ctx)
 
 ## Channels (Laravel-style named loggers)
 
-Channels mirror Laravel's `Log::channel('name')->info(...)` API — multiple named loggers, each backed by its own driver, selected per call. The primary channel comes from environment variables; additional channels are registered in code via [`NewChannel`](../../observability/channel.go).
+Channels mirror Laravel's `Log::channel('name')->info(...)` API — multiple named loggers, each backed by its own driver and **its own minimum level**, selected per call. The primary channel comes from environment variables; additional channels can be declared two ways:
+
+1. **In Go code** via [`NewChannel(name, cfg)`](../../observability/channel.go) — full programmatic control.
+2. **Via env vars only** via [`ChannelsFromEnv()`](../../observability/channel.go) — zero Go code, pure 12-factor (matches Laravel `config/logging.php`).
+
+Both can coexist. `NewChannel` is useful when channel config depends on runtime values; `ChannelsFromEnv` keeps `main.go` clean.
+
+### Option 1 — declared in Go code
 
 ```go
 app := framework.New("svc", "1.0.0").
     Use(observability.Module).                                    // primary from env
-    Use(observability.NewChannel("audit", observability.Config{   // local file
+    Use(observability.NewChannel("audit", observability.Config{   // local file, warn+ only
         Driver:      observability.DriverFile,
+        LogLevel:    slog.LevelWarn,                              // per-channel level
         LogFilePath: "/var/log/svc/audit.log",
     })).
     Use(observability.NewChannel("billing", observability.Config{ // separate OTLP collector
@@ -220,6 +238,39 @@ app := framework.New("svc", "1.0.0").
         OTLPEndpoint: "billing-collector:4317",
     }))
 ```
+
+### Option 2 — declared via env vars only (`ChannelsFromEnv()`)
+
+```go
+app := framework.New("svc", "1.0.0").
+    Use(observability.Module).
+    Use(observability.ChannelsFromEnv())  // single line, no per-channel code
+```
+
+```bash
+OBSERVABILITY_DRIVER=stdout
+OBSERVABILITY_CHANNELS=audit,billing
+
+# Each channel mirrors the primary env-var schema with the prefix
+#   OBSERVABILITY_CHANNEL_<NAME>_
+# Channel names are case-insensitive; hyphens normalise to underscores
+# (so `audit-trail` reads OBSERVABILITY_CHANNEL_AUDIT_TRAIL_*).
+
+OBSERVABILITY_CHANNEL_AUDIT_DRIVER=file
+OBSERVABILITY_CHANNEL_AUDIT_LOG_LEVEL=warn                      # Laravel 'level' => 'warning'
+OBSERVABILITY_CHANNEL_AUDIT_LOG_FILE_PATH=/var/log/svc/audit.log
+OBSERVABILITY_CHANNEL_AUDIT_LOG_FILE_ROTATION=daily
+
+OBSERVABILITY_CHANNEL_BILLING_DRIVER=otlp
+OBSERVABILITY_CHANNEL_BILLING_OTLP_ENDPOINT=billing-collector:4317
+OBSERVABILITY_CHANNEL_BILLING_OTLP_PROTOCOL=grpc
+
+# Heavy drivers (otlp, cloudwatch) still need their blank import in main.go.
+```
+
+`ChannelsFromEnv()` is a no-op when `OBSERVABILITY_CHANNELS` is unset or empty, so it is safe to leave in `main` even for services that have not declared any extra channels yet.
+
+Errors caught at startup: reserved name (`primary`), duplicate name, registration ordering (`ChannelsFromEnv()` must come after `Module`), unknown driver, missing required field per chosen driver.
 
 Per-call selection inside a handler:
 

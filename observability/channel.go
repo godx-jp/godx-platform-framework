@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"sync"
 
 	"github.com/godx-jp/godx-platform-framework/framework"
@@ -13,6 +15,11 @@ import (
 // returned by [Provider.Logger]. Extra channels registered via [NewChannel]
 // must use a different name.
 const PrimaryChannel = "primary"
+
+// ChannelsEnvVar is the comma-separated list of extra channel names read by
+// [ChannelsFromEnv]. Each name X expands to a per-channel env-var prefix
+// `OBSERVABILITY_CHANNEL_<X>_` (X is upper-cased).
+const ChannelsEnvVar = "OBSERVABILITY_CHANNELS"
 
 // NewChannel returns a framework module that registers an additional named
 // channel on top of the primary one. Channels are a logging concept — each
@@ -82,6 +89,131 @@ func (m *channelModule) Init(ctx context.Context, app *framework.App) error {
 	primary.registerChannel(m.name, channelProvider.logger)
 
 	app.OnShutdown(channelProvider.Shutdown)
+	return nil
+}
+
+// LoadChannelConfigFromEnv reads channel-scoped configuration from env vars
+// prefixed with `OBSERVABILITY_CHANNEL_<NAME>_`. Mirrors
+// [LoadConfigFromEnv] but with per-channel keys and Laravel-style
+// per-channel `LOG_LEVEL`. Unlike the primary loader, the OTLP vars are
+// also namespaced under the channel (because OTEL_EXPORTER_OTLP_* is a
+// global convention that cannot be repeated per channel):
+//
+//	OBSERVABILITY_CHANNEL_AUDIT_DRIVER=file
+//	OBSERVABILITY_CHANNEL_AUDIT_LOG_LEVEL=warn
+//	OBSERVABILITY_CHANNEL_AUDIT_LOG_FILE_PATH=/var/log/audit.log
+//	OBSERVABILITY_CHANNEL_AUDIT_LOG_FILE_ROTATION=daily
+//
+//	OBSERVABILITY_CHANNEL_BILLING_DRIVER=otlp
+//	OBSERVABILITY_CHANNEL_BILLING_OTLP_ENDPOINT=billing-collector:4317
+//	OBSERVABILITY_CHANNEL_BILLING_OTLP_PROTOCOL=grpc
+//
+// Defaults for missing values mirror the primary loader (driver=stdout,
+// level=info, file rotation=daily, OTLP protocol=grpc, etc.).
+func LoadChannelConfigFromEnv(name string) Config {
+	pfx := "OBSERVABILITY_CHANNEL_" + envSegment(name) + "_"
+	return Config{
+		Driver:             getEnv(pfx+"DRIVER", DriverStdout),
+		LogLevel:           parseLogLevel(getEnv(pfx+"LOG_LEVEL", "info")),
+		TraceSampleRate:    parseFloat(getEnv(pfx+"TRACE_SAMPLE_RATE", "1.0"), 1.0),
+		OTLPEndpoint:       os.Getenv(pfx + "OTLP_ENDPOINT"),
+		OTLPProtocol:       getEnv(pfx+"OTLP_PROTOCOL", "grpc"),
+		OTLPInsecure:       parseBool(getEnv(pfx+"OTLP_INSECURE", "true"), true),
+		AWSRegion:          os.Getenv(pfx + "AWS_REGION"),
+		CloudWatchLogGroup: os.Getenv(pfx + "CLOUDWATCH_LOG_GROUP"),
+		LogFilePath:        os.Getenv(pfx + "LOG_FILE_PATH"),
+		LogFileRotation:    getEnv(pfx+"LOG_FILE_ROTATION", "daily"),
+		LogFileMaxSizeMB:   parseInt(getEnv(pfx+"LOG_FILE_MAX_SIZE_MB", "100"), 100),
+		LogFileMaxAgeDays:  parseInt(getEnv(pfx+"LOG_FILE_MAX_AGE_DAYS", "14"), 14),
+		LogFileMaxBackups:  parseInt(getEnv(pfx+"LOG_FILE_MAX_BACKUPS", "0"), 0),
+		LogFileCompress:    parseBool(getEnv(pfx+"LOG_FILE_COMPRESS", "true"), true),
+		StackDrivers:       parseCSV(os.Getenv(pfx + "STACK_DRIVERS")),
+	}
+}
+
+// envSegment normalises a channel name to its env-var segment: uppercase,
+// hyphens/spaces converted to underscores. `audit-trail` → `AUDIT_TRAIL`.
+func envSegment(name string) string {
+	return strings.ToUpper(strings.NewReplacer("-", "_", " ", "_").Replace(name))
+}
+
+// ChannelsFromEnv returns a framework module that registers every channel
+// declared via [ChannelsEnvVar] (`OBSERVABILITY_CHANNELS`). Per-channel
+// configuration uses keys prefixed with `OBSERVABILITY_CHANNEL_<NAME>_` —
+// see [LoadChannelConfigFromEnv].
+//
+// Usage (no Go code per channel — pure 12-factor config):
+//
+//	app := framework.New("svc", "1.0.0").
+//	    Use(observability.Module).
+//	    Use(observability.ChannelsFromEnv())
+//
+// With:
+//
+//	OBSERVABILITY_DRIVER=stdout
+//	OBSERVABILITY_CHANNELS=audit,billing
+//	OBSERVABILITY_CHANNEL_AUDIT_DRIVER=file
+//	OBSERVABILITY_CHANNEL_AUDIT_LOG_LEVEL=warn
+//	OBSERVABILITY_CHANNEL_AUDIT_LOG_FILE_PATH=/var/log/audit.log
+//	OBSERVABILITY_CHANNEL_BILLING_DRIVER=otlp
+//	OBSERVABILITY_CHANNEL_BILLING_OTLP_ENDPOINT=billing-collector:4317
+//
+// The returned module is a no-op when `OBSERVABILITY_CHANNELS` is unset or
+// empty, so it is safe to leave in `main` for services that have not
+// declared any extra channels yet. Heavy drivers still require their own
+// blank import in consumer code.
+//
+// Order matters: like [NewChannel], this module must be registered AFTER
+// [Module] so the primary provider exists at wire-up time.
+func ChannelsFromEnv() framework.Module { return &envChannelsMod{} }
+
+type envChannelsMod struct{}
+
+func (envChannelsMod) Name() string { return "observability.channels-from-env" }
+
+func (envChannelsMod) Init(ctx context.Context, app *framework.App) error {
+	names := parseCSV(os.Getenv(ChannelsEnvVar))
+	if len(names) == 0 {
+		return nil
+	}
+
+	primary, ok := lookupProvider(app)
+	if !ok {
+		return fmt.Errorf("observability: ChannelsFromEnv must be registered after observability.Module")
+	}
+
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if name == PrimaryChannel {
+			return fmt.Errorf("observability: channel name %q (from %s) is reserved for the primary channel", PrimaryChannel, ChannelsEnvVar)
+		}
+		if _, dup := seen[name]; dup {
+			return fmt.Errorf("observability: channel %q listed twice in %s", name, ChannelsEnvVar)
+		}
+		seen[name] = struct{}{}
+
+		cfg := LoadChannelConfigFromEnv(name)
+		if cfg.ServiceName == "" {
+			cfg.ServiceName = app.Name()
+		}
+		if cfg.ServiceVersion == "" {
+			cfg.ServiceVersion = app.Version()
+		}
+		if cfg.Environment == "" {
+			cfg.Environment = getEnv("DEPLOYMENT_ENVIRONMENT", "dev")
+		}
+
+		channelProvider, err := NewProvider(ctx, cfg)
+		if err != nil {
+			return fmt.Errorf("observability: channel %q (from %s): %w", name, ChannelsEnvVar, err)
+		}
+		primary.registerChannel(name, channelProvider.logger)
+		app.OnShutdown(channelProvider.Shutdown)
+	}
 	return nil
 }
 

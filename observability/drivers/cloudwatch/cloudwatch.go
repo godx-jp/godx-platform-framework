@@ -1,5 +1,5 @@
 // Package cloudwatch is a stub driver that fails fast when AWS CloudWatch
-// is selected before the AWS ADOT integration ships (>= v0.5.0). Designed
+// is selected before the AWS ADOT integration ships (>= v0.6.0). Designed
 // as opt-in from day one so the future heavy-dependency version stays
 // backwards-compatible with how callers wire it up.
 //
@@ -23,10 +23,10 @@ import (
 const Name = "cloudwatch"
 
 // ErrNotImplemented is returned when this driver is selected before the AWS
-// ADOT integration lands. Pin >= v0.5.0 once the constructor returns a real
+// ADOT integration lands. Pin >= v0.6.0 once the constructor returns a real
 // instance.
 var ErrNotImplemented = errors.New(
-	"observability/drivers/cloudwatch: stub in v0.4.x — pin >= v0.5.0 once the AWS ADOT integration lands",
+	"observability/drivers/cloudwatch: stub in v0.4.x–v0.5.x — pin >= v0.6.0 once the AWS ADOT integration lands",
 )
 
 func init() { driver.Register(Name, New) }

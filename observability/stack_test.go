@@ -93,3 +93,60 @@ func TestStackDriver_ConfigFromEnv(t *testing.T) {
 		t.Fatalf("StackDrivers = %v, want %v", got, want)
 	}
 }
+
+func TestStackDriver_PerSubLevelFilter(t *testing.T) {
+	// "stdout:info,file:warn" → info goes to stdout only; warn goes to both.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stack-level.log")
+
+	stdoutCapture := captureStdout(t, func() {
+		p, err := observability.NewProvider(context.Background(), observability.Config{
+			ServiceName:  "stack-level-svc",
+			Driver:       observability.DriverStack,
+			StackDrivers: []string{"stdout:info", "file:warn"},
+			LogFilePath:  path,
+		})
+		if err != nil {
+			t.Fatalf("NewProvider: %v", err)
+		}
+		p.Logger().Info("info-only")
+		p.Logger().Warn("both")
+		if err := p.Shutdown(context.Background()); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	})
+
+	// stdout should see BOTH records (level=info passes both).
+	if !strings.Contains(stdoutCapture, `"msg":"info-only"`) {
+		t.Errorf("stdout missing info-only: %q", stdoutCapture)
+	}
+	if !strings.Contains(stdoutCapture, `"msg":"both"`) {
+		t.Errorf("stdout missing both: %q", stdoutCapture)
+	}
+
+	// file should see only "both" (level=warn drops info).
+	fileBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(fileBytes), `"msg":"info-only"`) {
+		t.Errorf("file leaked info-only record (warn filter broken): %q", string(fileBytes))
+	}
+	if !strings.Contains(string(fileBytes), `"msg":"both"`) {
+		t.Errorf("file missing warn record: %q", string(fileBytes))
+	}
+}
+
+func TestStackDriver_PerSubLevel_RejectsUnknownLevel(t *testing.T) {
+	_, err := observability.NewProvider(context.Background(), observability.Config{
+		ServiceName:  "svc",
+		Driver:       observability.DriverStack,
+		StackDrivers: []string{"stdout:loudly"},
+	})
+	if err == nil {
+		t.Fatalf("expected error for unknown sub level")
+	}
+	if !strings.Contains(err.Error(), "loudly") {
+		t.Fatalf("err should name bad level: %v", err)
+	}
+}

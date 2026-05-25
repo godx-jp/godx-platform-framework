@@ -124,13 +124,13 @@ func TestProvider_OTLP_RequiresEndpoint(t *testing.T) {
 	}
 }
 
-func TestProvider_CloudWatch_NotImplementedInV04(t *testing.T) {
+func TestProvider_CloudWatch_NotImplementedYet(t *testing.T) {
 	_, err := observability.NewProvider(context.Background(), observability.Config{
 		ServiceName: "svc",
 		Driver:      observability.DriverCloudWatch,
 	})
 	if err == nil {
-		t.Fatalf("expected ErrNotImplemented for cloudwatch driver in v0.4.x")
+		t.Fatalf("expected ErrNotImplemented for cloudwatch driver before v0.6.0")
 	}
 	if !strings.Contains(err.Error(), "cloudwatch") {
 		t.Fatalf("err should mention cloudwatch: %v", err)

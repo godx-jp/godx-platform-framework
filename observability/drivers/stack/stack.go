@@ -6,9 +6,16 @@
 // Auto-registered when the observability package is imported. Heavy
 // sub-drivers (otlp, cloudwatch) still need their own blank import.
 //
+// Each entry in OBSERVABILITY_STACK_DRIVERS may carry an optional per-sub
+// minimum level via `name:level` syntax. Useful for "info to stdout, warn+
+// to file" Laravel-style routing without defining named channels:
+//
 //	OBSERVABILITY_DRIVER=stack
-//	OBSERVABILITY_STACK_DRIVERS=stdout,file
+//	OBSERVABILITY_STACK_DRIVERS=stdout:info,file:warn
 //	OBSERVABILITY_LOG_FILE_PATH=/var/log/app.log
+//
+// When the `:level` suffix is omitted, the sub-driver inherits the parent's
+// OBSERVABILITY_LOG_LEVEL.
 package stack
 
 import (
@@ -23,6 +30,28 @@ import (
 
 	"github.com/godx-jp/godx-platform-framework/observability/driver"
 )
+
+// parseSubSpec splits one entry of OBSERVABILITY_STACK_DRIVERS into its
+// driver name and optional minimum log level (`name[:level]`). Returns an
+// error when `:level` is present but unrecognised; an empty entry returns
+// ("", _, false, nil) so the caller can skip it.
+func parseSubSpec(raw string) (name string, level slog.Level, hasLevel bool, err error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", 0, false, nil
+	}
+	colon := strings.IndexByte(trimmed, ':')
+	if colon < 0 {
+		return strings.ToLower(trimmed), 0, false, nil
+	}
+	name = strings.ToLower(strings.TrimSpace(trimmed[:colon]))
+	lvlRaw := trimmed[colon+1:]
+	lvl, ok := driver.ParseLogLevel(lvlRaw)
+	if !ok {
+		return "", 0, false, fmt.Errorf("stack driver: sub %q has unknown level %q (valid: debug, info, warn, error)", name, strings.TrimSpace(lvlRaw))
+	}
+	return name, lvl, true, nil
+}
 
 // Name is the identifier used by OBSERVABILITY_DRIVER to select this driver.
 const Name = "stack"
@@ -39,7 +68,10 @@ func New(ctx context.Context, s driver.Spec) (driver.Driver, error) {
 
 	subs := make([]driver.Driver, 0, len(s.StackDrivers))
 	for _, raw := range s.StackDrivers {
-		name := strings.ToLower(strings.TrimSpace(raw))
+		name, lvl, hasLevel, err := parseSubSpec(raw)
+		if err != nil {
+			return nil, err
+		}
 		if name == "" {
 			continue
 		}
@@ -50,6 +82,9 @@ func New(ctx context.Context, s driver.Spec) (driver.Driver, error) {
 		sub := s
 		sub.Name = name
 		sub.StackDrivers = nil
+		if hasLevel {
+			sub.LogLevel = lvl
+		}
 
 		d, err := driver.New(ctx, sub)
 		if err != nil {
