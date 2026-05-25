@@ -86,6 +86,10 @@ godx-platform-framework/
 │   ├── driver/                         Limiter interface + Spec + registry
 │   ├── drivers/                        memory (auto) · redis (blank-import)
 │   └── middleware/                     HTTP 429 + Retry-After middleware
+├── auth/                               Authentication guards (v1.1.0)
+│   ├── driver/                         Guard interface + Spec + registry
+│   ├── drivers/                        jwt · apikey (auto) · introspect (stub)
+│   └── middleware/                     HTTP 401/403 auth + authorization
 ├── mail/ notifications/ scheduler/ featureflag/ resilience/  Future (v0.10.x)
 ├── queue/                              Future (v0.11)
 ├── httpx/                              Future (v0.12)
@@ -171,6 +175,10 @@ app.Shutdown(ctx)
 │  │  ┌──────────────────────────────────────────────────────┐  │  │
 │  │  │  middleware (observability/middleware) — optional    │  │  │
 │  │  │  middleware.HTTP(obs)(handler) — span + correlation  │  │  │
+│  │  └──────────────────────────────────────────────────────┘  │  │
+│  │  ┌──────────────────────────────────────────────────────┐  │  │
+│  │  │  auth.Module + auth/middleware — optional            │  │  │
+│  │  │  Authenticate / RequireRole / RequireGate on chi     │  │  │
 │  │  └──────────────────────────────────────────────────────┘  │  │
 │  │                                                             │  │
 │  │  (future) storage · cache · queue · httpx · eventbus       │  │

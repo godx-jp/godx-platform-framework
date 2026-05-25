@@ -291,6 +291,43 @@ The redis driver carries the `go-redis/v9` SDK and is registered only when the c
 import _ "github.com/godx-jp/godx-platform-framework/ratelimit/drivers/redis"
 ```
 
+## Auth
+
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `AUTH_DEFAULT` | string | `apikey` | Default guard name |
+| `AUTH_GUARDS` | csv | default only | Named guards to register |
+
+Per-guard overrides use `AUTH_GUARD_<NAME>_*`. When `<NAME>` matches a known driver name (`jwt`, `apikey`, `introspect`) and `DRIVER` is unset, the driver is inferred from the name.
+
+| Variable | Type | Default | Driver | Purpose |
+|----------|------|---------|--------|---------|
+| `AUTH_GUARD_<NAME>_DRIVER` | enum | inferred from name | all | `jwt` · `apikey` · `introspect` |
+| `AUTH_GUARD_<NAME>_JWKS_URL` | url | _unset_ | jwt | JWKS endpoint for RS*/ES* verification |
+| `AUTH_GUARD_<NAME>_ISSUER` | string | _unset_ | jwt | Required `iss` claim |
+| `AUTH_GUARD_<NAME>_AUDIENCE` | string | _unset_ | jwt | Required `aud` claim |
+| `AUTH_GUARD_<NAME>_ROLES_CLAIM` | string | `roles` | jwt | Claim name for roles |
+| `AUTH_GUARD_<NAME>_PERMISSIONS_CLAIM` | string | `permissions` | jwt | Claim name for permissions |
+| `AUTH_GUARD_<NAME>_SUBJECT_CLAIM` | string | `sub` | jwt | Subject claim |
+| `AUTH_GUARD_<NAME>_ACTOR_KIND_CLAIM` | string | _unset_ | jwt | Actor kind claim |
+| `AUTH_GUARD_<NAME>_HEADER` | string | `X-API-Key` | apikey | Header carrying the API key |
+| `AUTH_GUARD_<NAME>_KEYS` | csv | _unset_ | apikey | Static keys as `subject:secret` pairs |
+| `AUTH_GUARD_<NAME>_INTROSPECT_URL` | url | _unset_ | introspect | OAuth2 introspection endpoint |
+
+Per-key metadata for apikey guards (optional, when using `KEYS`):
+
+| Variable | Type | Purpose |
+|----------|------|---------|
+| `AUTH_GUARD_<NAME>_KEY_<SUBJECT>_ROLES` | csv | Roles for a key subject |
+| `AUTH_GUARD_<NAME>_KEY_<SUBJECT>_PERMISSIONS` | csv | Permissions for a key subject |
+| `AUTH_GUARD_<NAME>_KEY_<SUBJECT>_ACTOR_KIND` | string | Actor kind for a key subject |
+
+JWT and apikey drivers auto-register when the `auth` package is imported. The `introspect` driver is a stub — blank-import when wired.
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/auth/drivers/introspect"
+```
+
 ## HTTP middleware
 
 | Constant | Default | Purpose |

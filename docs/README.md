@@ -31,6 +31,7 @@ Index for the godx-platform-framework documentation.
 | `httpclient` | stable (v0.9.1) | [modules/httpclient](./modules/httpclient.md) |
 | `validation` | stable (v0.9.0) | [modules/validation](./modules/validation.md) |
 | `ratelimit` | stable (v0.9.2) | [modules/ratelimit](./modules/ratelimit.md) |
+| `auth` | stable (v1.1.0) | [modules/auth](./modules/auth.md) |
 | `mail` | stable (v0.10.0) | [modules/mail](./modules/mail.md) |
 | `notifications` | stable (v0.10.1) | [modules/notifications](./modules/notifications.md) |
 | `scheduler` | stable (v0.13.0) | [modules/scheduler](./modules/scheduler.md) |

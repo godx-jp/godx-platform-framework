@@ -4,6 +4,31 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-05-25
+
+Ships the `auth/` module — named authentication guards with JWT and API-key drivers plus HTTP authorization middleware.
+
+### Added
+
+- **`auth/` module** — `Manager` + `Principal` + `FromApp` / `PrincipalFromContext` helpers.
+- **Drivers:** `jwt` (JWKS RS*/ES*), `apikey` (static key map), `introspect` (stub).
+- **`auth/gate.go`** — Laravel-style `Define` / `Check` gates on `*Principal`.
+- **`auth/principal.go`** — `HasRole`, `HasPermission`, `HasActorKind` helpers.
+- **`auth/middleware`** — `Authenticate`, `Optional`, `RequireRole`, `RequirePermission`, `RequireActorKind`, `RequireGate` with JSON 401/403 responses.
+- **`httpx/middleware/auth.go`** — thin wrappers for httpx stacks.
+- **`examples/auth/main.go`**, **`docs/modules/auth.md`**.
+
+### Tests
+
+- **`auth/middleware/http_test.go`** — 401/403 semantics, JWT + apikey integration.
+- **`auth/manager_test.go`**, **`auth/module_test.go`**, **`auth/driver/registry_test.go`**.
+
+### Changed
+
+- `docs/CONFIGURATION.md` — `AUTH_*` env var section.
+- `docs/ARCHITECTURE.md` — auth layer in repository layout and layered view.
+- `docs/README.md` — links `modules/auth.md`.
+
 ## [1.0.0] — 2026-05-25
 
 **API freeze.** Laravel-parity roadmap complete. SemVer 1.x guarantees apply to exported symbols and documented env vars (see [VERSIONING.md](./docs/VERSIONING.md)).
