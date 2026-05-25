@@ -23,13 +23,31 @@ _ = pub.Publish(ctx, envelope.Event{
 })
 ```
 
+## Domain → integration bridge
+
+Forward in-process domain events to the integration broker:
+
+```go
+bus := // from events.Module
+pub, _ := mgr.Publisher()
+bridge, _ := messaging.WireBridge(ctx, bus, pub, messaging.BridgeOptions{
+    Prefix: "integration.",
+    Source: "godx://orders",
+})
+defer bridge.Close()
+```
+
 ## Drivers
 
-| Driver | Status |
-|--------|--------|
-| `memory` | stable (auto-register) |
-| `nats` | stub (JetStream planned) |
-| `kafka` | stub |
+| Driver | Status | Registration |
+|--------|--------|--------------|
+| `memory` | stable | auto |
+| `nats` | stable (JetStream) | opt-in blank import |
+| `kafka` | stub | opt-in |
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/messaging/drivers/nats"
+```
 
 ## Env vars
 
@@ -38,5 +56,7 @@ _ = pub.Publish(ctx, envelope.Event{
 | `MESSAGING_DEFAULT` | `platform` |
 | `MESSAGING_CONNECTIONS` | default name |
 | `MESSAGING_CONN_<NAME>_DRIVER` | `memory` |
+| `MESSAGING_CONN_<NAME>_NATS_URL` | — |
+| `MESSAGING_CONN_<NAME>_STREAM` | optional JetStream stream |
 
-See [messaging module plan](../../CHANGELOG.md) for outbox + NATS JetStream roadmap.
+Transactional outbox relay lives in `messaging/outbox` (application wires DB + relay worker).

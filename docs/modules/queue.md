@@ -34,6 +34,7 @@ _, _ = q.Push(ctx, "emails", []byte(`{"to":"user@example.com"}`))
 | Driver | Env | Registration | Status |
 |--------|-----|--------------|--------|
 | memory | `QUEUE_QUEUE_<NAME>_DRIVER=memory` | auto | stable |
+| redis | `QUEUE_QUEUE_<NAME>_DRIVER=redis` | opt-in (`_ ".../queue/drivers/redis"`) | stable |
 | sqs | `QUEUE_QUEUE_<NAME>_DRIVER=sqs` | opt-in (`_ ".../queue/drivers/sqs"`) | stub |
 | kafka | `QUEUE_QUEUE_<NAME>_DRIVER=kafka` | opt-in | stub |
 | nats | `QUEUE_QUEUE_<NAME>_DRIVER=nats` | opt-in | stub |
@@ -48,6 +49,17 @@ _, _ = q.Push(ctx, "emails", []byte(`{"to":"user@example.com"}`))
 | `QUEUE_QUEUE_<NAME>_DEFAULT` | `default` | Default queue name on connection |
 | `QUEUE_QUEUE_<NAME>_WORKERS` | `1` | Worker count for Run |
 | `QUEUE_QUEUE_<NAME>_SIZE` | `256` | Memory driver channel capacity |
+| `QUEUE_QUEUE_<NAME>_REDIS_URL` | — | Redis URL (`redis://…`) |
+| `QUEUE_QUEUE_<NAME>_REDIS_ADDRESS` | — | Redis host:port when URL unset |
+| `QUEUE_QUEUE_<NAME>_REDIS_PREFIX` | `godx:queue:` | Key prefix |
+
+## Retry / DLQ
+
+Configure via `queue.WithRetryPolicy` — exponential backoff, `MaxAttempts`, and `DLQSuffix` (dead-letter queue name). Emits `job.dead` when max attempts exceeded.
+
+## Conformance
+
+`queue/conformance_test.go` exercises the shared backend contract (memory; extend with Redis in integration CI).
 
 ## Events
 

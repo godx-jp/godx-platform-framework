@@ -2,6 +2,21 @@
 
 All notable changes are documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · versioning: [SemVer](https://semver.org/).
 
+## [1.6.0] — 2026-05-25
+
+Production hardening for queue, messaging, and scheduler modules.
+
+### Added
+
+- **queue v1.4.1** — Redis driver (`LIST` + delayed `ZSET`), `QUEUE_QUEUE_*_REDIS_*` env vars, driver conformance suite for memory.
+- **messaging v1.3.1** — NATS JetStream broker driver; `WireBridge` forwards `events.Bus` domain events to CloudEvents integration publish.
+- **scheduler v1.6** — `WeeklyOn`, `Between`, `Environments`, `When`/`Unless`, `RunOnQueue`, maintenance mode, `LastRun`/`Health`, lock TTL renewal, Redis lock adapter (`scheduler/lock/redis`).
+
+### Changed
+
+- Scheduler cron helpers use six-field expressions (seconds) to match the internal parser.
+- `docs/modules/queue.md`, `docs/modules/messaging.md`, `docs/modules/scheduler.md` updated.
+
 ## [1.5.0] — 2026-05-25
 
 Cross-cutting release: auth v1.2, messaging v1.3, queue v1.4, scheduler v1.5.
