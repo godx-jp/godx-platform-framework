@@ -141,6 +141,15 @@ if errors.Is(err, mdriver.ErrClosed) { /* transport already shut down */ }
 
 `Send` also returns plain errors for a missing transport or empty recipient list; transport-specific failures (SMTP, REST) propagate from the driver and trigger `mail.failed`.
 
+## Security
+
+The `smtp` driver guards against SMTP header / CRLF injection before it ever dials the server:
+
+- Every address — the `From` and each `To` — is parsed with `net/mail.ParseAddress` and rejected if it fails to parse or contains a CR (`\r`) or LF (`\n`). Both bare addresses (`a@b.com`) and display-name form (`Name <a@b.com>`) remain valid.
+- The `Subject` is rejected if it contains CR, LF, or any other ASCII control character, and is additionally Q-encoded (`mime.QEncoding`) so non-ASCII and edge-case bytes cannot break out into a new header line.
+
+A message that fails validation never reaches the wire; `Send` returns a descriptive error (wrapping the sentinel `smtp.ErrHeaderInjection` for control-character cases) instead of smuggling extra headers such as `Bcc:` or a forged `Content-Type`.
+
 ## Context propagation
 
 `mail.ContextWithManager(ctx, mgr)` attaches a manager to a context; `mail.FromContext(ctx)` retrieves it. `Send` also looks up an `events.Bus` from the context when the manager has none. `mail.FromApp(app)` is the canonical way to retrieve the manager built by `mail.Module`.
