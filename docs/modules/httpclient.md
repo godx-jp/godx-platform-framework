@@ -160,9 +160,11 @@ Responses are returned in FIFO order from the queue; once the queue is drained, 
 
 Wraps `stdlib` with:
 
-- Retry on transport errors and on `5xx` for idempotent methods (`GET`, `HEAD`, `PUT`, `DELETE`, `OPTIONS`).
+- Retry on transport errors and on `5xx` responses, **only for the RFC 7231 "safe" methods** (`GET`, `HEAD`, `OPTIONS`, `TRACE`).
 - Exponential backoff with jitter (`MaxAttempts = MaxRetries + 1`).
 - A circuit breaker that opens after `CBMaxFailures` consecutive failures and half-opens after `CBResetTimeout`.
+
+> **Security — retries are scoped to safe methods.** Non-safe methods (`POST`, `PUT`, `PATCH`, `DELETE`) are **never retried**, neither on a `5xx` response nor on a transport error. Retrying them could duplicate side effects (a second write/charge/delete) and multiply load on a struggling upstream, since the request may already have reached the server. Such failures still count against the circuit breaker but are returned to the caller after a single attempt.
 
 ```bash
 HTTPCLIENT_DEFAULT=resilient
