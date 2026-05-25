@@ -37,17 +37,6 @@ func MustDefine(name string, fn GateFunc) {
 	}
 }
 
-// Check runs the named gate against the principal.
-func Check(name string, p *Principal) bool {
-	gateMu.RLock()
-	fn, ok := gates[name]
-	gateMu.RUnlock()
-	if !ok || fn == nil {
-		return false
-	}
-	return fn(p)
-}
-
 // GateNames returns registered gate names (unordered).
 func GateNames() []string {
 	gateMu.RLock()

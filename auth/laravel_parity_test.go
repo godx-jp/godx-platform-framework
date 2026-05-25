@@ -8,6 +8,7 @@ import (
 // Reference: laravel/framework tests/Auth/AuthAccessGateTest.php
 
 func TestLaravelGateDefineAllowAndDeny(t *testing.T) {
+	resetAuthTestState(t)
 	allow := "laravel-allow-" + t.Name()
 	deny := "laravel-deny-" + t.Name()
 	admin := &Principal{SubjectID: "1", Roles: []string{"admin"}}
@@ -28,6 +29,7 @@ func TestLaravelGateDefineAllowAndDeny(t *testing.T) {
 }
 
 func TestLaravelGateMissingAbilityReturnsFalse(t *testing.T) {
+	resetAuthTestState(t)
 	// Laravel: $gate->check('missing') === false
 	if Check("definitely-missing-gate-"+t.Name(), &Principal{SubjectID: "1"}) {
 		t.Fatal("missing gate should deny")
@@ -35,6 +37,7 @@ func TestLaravelGateMissingAbilityReturnsFalse(t *testing.T) {
 }
 
 func TestLaravelGateNilPrincipalLikeGuest(t *testing.T) {
+	resetAuthTestState(t)
 	name := "laravel-guest-gate-" + t.Name()
 	MustDefine(name, func(p *Principal) bool {
 		// Laravel closures with ?User allow guests when returning true for nil
@@ -81,6 +84,7 @@ func TestLaravelHasPermissionAnyOfArrayAbilities(t *testing.T) {
 }
 
 func TestLaravelGateORComposition(t *testing.T) {
+	resetAuthTestState(t)
 	// Laravel: return $user->isAdmin() || $user->can('edit-posts')
 	name := "laravel-or-gate-" + t.Name()
 	MustDefine(name, func(p *Principal) bool {

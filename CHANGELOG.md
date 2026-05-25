@@ -2,7 +2,20 @@
 
 All notable changes are documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · versioning: [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [1.5.0] — 2026-05-25
+
+Cross-cutting release: auth v1.2, messaging v1.3, queue v1.4, scheduler v1.5.
+
+### Added
+
+- **auth v1.2** — `Gate::before/after` (`Before`/`After`), `Policy` + `RegisterPolicy`, `Authorize`, `RequireAuthorize` middleware, `PrincipalForGuard`, `auth/testing.ActingAs`.
+- **messaging v1.3** — new module: CloudEvents envelope, memory broker driver, `Publisher`/`Subscriber`, outbox relay helper, NATS/Kafka stubs.
+- **queue v1.4** — `RetryPolicy`, exponential backoff, DLQ routing, `job.dead` event.
+- **scheduler v1.5** — lifecycle events (`schedule.*`), error handling, `Timeout`, graceful `Stop`, `DailyAt`/`Hourly` builders.
+
+### Tests
+
+- `auth/authorize_test.go`, `messaging/manager_test.go`, `queue/retry_test.go`, `scheduler/runjob_test.go`.
 
 ## [1.1.0] — 2026-05-25
 

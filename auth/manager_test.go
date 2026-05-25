@@ -122,6 +122,7 @@ func TestManagerConcurrentAuthenticate(t *testing.T) {
 }
 
 func TestGateDefineCheck(t *testing.T) {
+	resetAuthTestState(t)
 	if err := Define("test-gate-auth", func(p *Principal) bool {
 		return p != nil && p.SubjectID == "gate-user"
 	}); err != nil {

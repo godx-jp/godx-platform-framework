@@ -95,9 +95,10 @@ func TestOnOneServerUsesCacheLock(t *testing.T) {
 	}
 	s := New(Options{DistributedLock: cl})
 	var runs atomic.Int32
-	if err := s.Cron("@every 200ms").OnOneServer().Do("once", func(ctx context.Context) error {
+	// Hold the distributed lock longer than one interval so a second tick must skip.
+	if err := s.Cron("@every 1s").OnOneServer().Do("once", func(ctx context.Context) error {
 		runs.Add(1)
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(1500 * time.Millisecond)
 		return nil
 	}); err != nil {
 		t.Fatalf("Do: %v", err)
@@ -105,7 +106,7 @@ func TestOnOneServerUsesCacheLock(t *testing.T) {
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(2200 * time.Millisecond)
 	_ = s.Stop(context.Background())
 	if runs.Load() != 1 {
 		t.Fatalf("runs=%d want 1 (second tick should skip)", runs.Load())

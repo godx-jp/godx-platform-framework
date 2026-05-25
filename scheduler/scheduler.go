@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/godx-jp/godx-platform-framework/events"
 	"github.com/godx-jp/godx-platform-framework/scheduler/lock"
 	"github.com/robfig/cron/v3"
 )
@@ -15,28 +16,31 @@ type JobFunc func(ctx context.Context) error
 
 // Options configures a Scheduler.
 type Options struct {
-	// Location sets the cron timezone. Nil uses UTC.
 	Location *time.Location
-	// DistributedLock enables OnOneServer when non-nil.
 	DistributedLock lock.Mutex
+	Bus             events.Bus
+	DefaultTimeout  time.Duration
 }
 
-// Scheduler registers and runs cron jobs.
 type Scheduler struct {
 	cron    *cron.Cron
 	parser  cron.Parser
 	mu      sync.Mutex
 	started bool
 	jobs    []jobDef
+	bus     events.Bus
+	defaultTimeout time.Duration
 
 	memLock  lock.Mutex
 	distLock lock.Mutex
+	runWG    sync.WaitGroup
 }
 
 type jobDef struct {
 	name             string
 	withoutOverlap   bool
 	onOneServer      bool
+	timeout          time.Duration
 	fn               JobFunc
 }
 
@@ -49,10 +53,12 @@ func New(opts Options) *Scheduler {
 	}
 	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	s := &Scheduler{
-		cron:     cron.New(cron.WithLocation(loc), cron.WithParser(parser)),
-		parser:   parser,
-		memLock:  lock.NewMemory(),
-		distLock: opts.DistributedLock,
+		cron:           cron.New(cron.WithLocation(loc), cron.WithParser(parser)),
+		parser:         parser,
+		memLock:        lock.NewMemory(),
+		distLock:       opts.DistributedLock,
+		bus:            opts.Bus,
+		defaultTimeout: opts.DefaultTimeout,
 	}
 	return s
 }
@@ -80,6 +86,7 @@ type Schedule struct {
 	expr             string
 	withoutOverlap   bool
 	onOneServer      bool
+	timeout          time.Duration
 }
 
 // WithoutOverlapping skips a run when the previous invocation is still active.
@@ -91,6 +98,12 @@ func (sc *Schedule) WithoutOverlapping() *Schedule {
 // OnOneServer skips a run when another replica holds the distributed lock.
 func (sc *Schedule) OnOneServer() *Schedule {
 	sc.onOneServer = true
+	return sc
+}
+
+// Timeout sets a per-run context deadline.
+func (sc *Schedule) Timeout(d time.Duration) *Schedule {
+	sc.timeout = d
 	return sc
 }
 
@@ -106,6 +119,7 @@ func (sc *Schedule) Do(name string, fn JobFunc) error {
 		name:           name,
 		withoutOverlap: sc.withoutOverlap,
 		onOneServer:    sc.onOneServer,
+		timeout:        sc.timeout,
 		fn:             fn,
 	}
 	wrapped := func() {
@@ -129,13 +143,14 @@ func (sc *Schedule) Do(name string, fn JobFunc) error {
 
 func (s *Scheduler) runJob(def jobDef) {
 	ctx := context.Background()
-
 	if def.onOneServer {
 		if s.distLock == nil {
+			s.emit(ctx, EventSkipped, def.name, "lock_misconfigured", nil)
 			return
 		}
 		release, ok, err := s.distLock.TryAcquire(ctx, def.name)
 		if err != nil || !ok {
+			s.emit(ctx, EventSkipped, def.name, "lock_busy", err)
 			return
 		}
 		defer func() { _ = release() }()
@@ -144,12 +159,49 @@ func (s *Scheduler) runJob(def jobDef) {
 	if def.withoutOverlap {
 		release, ok, err := s.memLock.TryAcquire(ctx, def.name)
 		if err != nil || !ok {
+			s.emit(ctx, EventSkipped, def.name, "overlap", err)
 			return
 		}
 		defer func() { _ = release() }()
 	}
 
-	_ = def.fn(ctx)
+	timeout := def.timeout
+	if timeout <= 0 {
+		timeout = s.defaultTimeout
+	}
+	runCtx := ctx
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	if cancel != nil {
+		defer cancel()
+	}
+
+	s.runWG.Add(1)
+	defer s.runWG.Done()
+	s.emit(runCtx, EventStarted, def.name, "", nil)
+	start := time.Now()
+	err := def.fn(runCtx)
+	if err != nil {
+		s.emit(runCtx, EventFailed, def.name, err.Error(), err)
+		return
+	}
+	s.emit(runCtx, EventFinished, def.name, fmt.Sprintf("%d", time.Since(start).Milliseconds()), nil)
+}
+
+func (s *Scheduler) emit(ctx context.Context, name, job, detail string, err error) {
+	if s.bus == nil {
+		return
+	}
+	meta := map[string]string{"job": job}
+	if detail != "" {
+		meta["detail"] = detail
+	}
+	if err != nil {
+		meta["error"] = err.Error()
+	}
+	_ = s.bus.Dispatch(ctx, events.Event{Name: name, Metadata: meta})
 }
 
 // Start begins executing registered jobs. Safe to call once.
@@ -165,15 +217,25 @@ func (s *Scheduler) Start(_ context.Context) error {
 }
 
 // Stop halts the cron runner and waits for in-flight jobs.
-func (s *Scheduler) Stop(_ context.Context) error {
+func (s *Scheduler) Stop(ctx context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.started {
+		s.mu.Unlock()
 		return nil
 	}
-	ctx := s.cron.Stop()
-	<-ctx.Done()
+	cronCtx := s.cron.Stop()
 	s.started = false
+	s.mu.Unlock()
+	<-cronCtx.Done()
+	done := make(chan struct{})
+	go func() {
+		s.runWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 	return nil
 }
 

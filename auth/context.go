@@ -8,9 +8,40 @@ import (
 )
 
 type contextKey struct{}
+type guardMapKey struct{}
 
 func ContextWithPrincipal(ctx context.Context, p *Principal) context.Context {
-	return context.WithValue(ctx, contextKey{}, p)
+	ctx = context.WithValue(ctx, contextKey{}, p)
+	if p != nil && p.Guard != "" {
+		ctx = ContextWithPrincipalForGuard(ctx, p.Guard, p)
+	}
+	return ctx
+}
+
+// ContextWithPrincipalForGuard stores a principal for a named guard.
+func ContextWithPrincipalForGuard(ctx context.Context, guard string, p *Principal) context.Context {
+	if ctx == nil || guard == "" {
+		return ctx
+	}
+	m, _ := ctx.Value(guardMapKey{}).(map[string]*Principal)
+	if m == nil {
+		m = map[string]*Principal{}
+	}
+	m[guard] = p
+	return context.WithValue(ctx, guardMapKey{}, m)
+}
+
+// PrincipalForGuard returns the principal bound to guard name.
+func PrincipalForGuard(ctx context.Context, guard string) (*Principal, bool) {
+	if ctx == nil || guard == "" {
+		return nil, false
+	}
+	m, ok := ctx.Value(guardMapKey{}).(map[string]*Principal)
+	if !ok {
+		return nil, false
+	}
+	p, ok := m[guard]
+	return p, ok && p != nil
 }
 
 func PrincipalFromContext(ctx context.Context) (*Principal, bool) {

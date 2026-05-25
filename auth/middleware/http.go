@@ -176,3 +176,30 @@ func RequireGate(name string) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// RequireAuthorize returns 403 when auth.Authorize(ability, principal, resource) fails.
+func RequireAuthorize(ability string, resource func(*http.Request) (any, error)) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p, ok := auth.PrincipalFromContext(r.Context())
+			if !ok || p == nil {
+				writeForbidden(w, "authentication required")
+				return
+			}
+			var res any
+			if resource != nil {
+				var err error
+				res, err = resource(r)
+				if err != nil {
+					writeForbidden(w, err.Error())
+					return
+				}
+			}
+			if !auth.Authorize(ability, p, res) {
+				writeForbidden(w, "forbidden")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}

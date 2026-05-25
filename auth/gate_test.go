@@ -6,6 +6,7 @@ import (
 )
 
 func TestDefineDuplicateReturnsError(t *testing.T) {
+	resetAuthTestState(t)
 	name := "dup-gate-" + t.Name()
 	if err := Define(name, func(*Principal) bool { return true }); err != nil {
 		t.Fatal(err)
@@ -16,6 +17,7 @@ func TestDefineDuplicateReturnsError(t *testing.T) {
 }
 
 func TestMustDefinePanicsOnDuplicate(t *testing.T) {
+	resetAuthTestState(t)
 	name := "must-dup-" + t.Name()
 	MustDefine(name, func(*Principal) bool { return true })
 	defer func() {
@@ -29,12 +31,14 @@ func TestMustDefinePanicsOnDuplicate(t *testing.T) {
 }
 
 func TestCheckUnknownGateReturnsFalse(t *testing.T) {
+	resetAuthTestState(t)
 	if Check("no-such-gate-"+t.Name(), &Principal{SubjectID: "x"}) {
 		t.Fatal("expected false for undefined gate")
 	}
 }
 
 func TestCheckNilPrincipal(t *testing.T) {
+	resetAuthTestState(t)
 	name := "nil-principal-" + t.Name()
 	MustDefine(name, func(p *Principal) bool { return p != nil })
 	if Check(name, nil) {

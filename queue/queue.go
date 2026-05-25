@@ -14,15 +14,17 @@ const (
 	EventProcessing = "job.processing"
 	EventProcessed  = "job.processed"
 	EventFailed     = "job.failed"
+	EventDead       = "job.dead"
 )
 
 // Queue is the user-facing handle for one named queue connection.
 type Queue struct {
-	name    string
+	name         string
 	defaultQueue string
-	backend qdriver.Backend
-	bus     events.Bus
-	handler qdriver.Handler
+	backend      qdriver.Backend
+	bus          events.Bus
+	handler      qdriver.Handler
+	retry        RetryPolicy
 
 	mu      sync.RWMutex
 	workers int
@@ -35,10 +37,11 @@ type Queue struct {
 // the normal boot path.
 func NewQueue(name string, backend qdriver.Backend, opts ...Option) *Queue {
 	q := &Queue{
-		name:    name,
+		name:         name,
 		defaultQueue: "default",
-		backend: backend,
-		workers: 1,
+		backend:      backend,
+		workers:      1,
+		retry:        defaultRetryPolicy(),
 	}
 	for _, o := range opts {
 		o(q)
@@ -67,6 +70,11 @@ func WithDefaultQueue(name string) Option {
 			q.defaultQueue = name
 		}
 	}
+}
+
+// WithRetryPolicy configures retry, backoff, and DLQ routing.
+func WithRetryPolicy(p RetryPolicy) Option {
+	return func(q *Queue) { q.retry = p.withDefaults() }
 }
 
 // WithWorkers sets background worker count for Run.
@@ -113,8 +121,20 @@ func (q *Queue) Dispatch(ctx context.Context, queue string, handler qdriver.Hand
 
 	q.emit(ctx, EventProcessing, job, nil)
 	if err := handler(ctx, job); err != nil {
+		policy := q.retry.withDefaults()
+		nextAttempt := job.Attempts() + 1
+		if nextAttempt >= policy.MaxAttempts {
+			q.emit(ctx, EventDead, job, err)
+			dlq := dlqName(queue, policy.DLQSuffix)
+			if _, pushErr := q.backend.Push(ctx, dlq, job.Payload()); pushErr != nil {
+				return pushErr
+			}
+			_ = q.backend.Delete(ctx, job)
+			return err
+		}
 		q.emit(ctx, EventFailed, job, err)
-		_ = q.backend.Release(ctx, job, 0)
+		delay := computeBackoff(policy, nextAttempt)
+		_ = q.backend.Release(ctx, job, delay)
 		return err
 	}
 	if err := q.backend.Delete(ctx, job); err != nil {

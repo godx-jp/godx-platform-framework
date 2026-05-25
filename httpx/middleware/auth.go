@@ -36,3 +36,8 @@ func RequireActorKind(kinds ...auth.ActorKind) func(http.Handler) http.Handler {
 func RequireGate(name string) func(http.Handler) http.Handler {
 	return authmw.RequireGate(name)
 }
+
+// RequireAuthorize wraps auth/middleware.RequireAuthorize for httpx stacks.
+func RequireAuthorize(ability string, resource func(*http.Request) (any, error)) func(http.Handler) http.Handler {
+	return authmw.RequireAuthorize(ability, resource)
+}
