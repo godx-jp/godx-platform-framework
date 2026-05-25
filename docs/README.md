@@ -34,7 +34,7 @@ Index for the godx-platform-framework documentation.
 | `notifications` | stable (v0.10.1) | [modules/notifications](./modules/notifications.md) |
 | `scheduler` | stable (v0.13.0) | [modules/scheduler](./modules/scheduler.md) |
 | `featureflag` | stable (v0.13.1) | [modules/featureflag](./modules/featureflag.md) |
-| `resilience` | roadmap (v0.13.x) | — |
+| `resilience` | stable (v0.13.2) | [modules/resilience](./modules/resilience.md) |
 | `queue` | stable (v0.11.0) | [modules/queue](./modules/queue.md) |
 | `httpx` | roadmap (v0.12) | — |
 | `health` | roadmap (v0.14) | — |

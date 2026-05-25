@@ -4,6 +4,19 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-05-25
+
+Ships the `resilience/` module — shared retry, circuit-breaker, timeout, and bulkhead primitives.
+
+### Added
+
+- **`resilience/` package** — `retry.go`, `circuitbreaker.go`, `timeout.go`, `bulkhead.go`.
+- **`docs/modules/resilience.md`**.
+
+### Changed
+
+- **`httpclient/drivers/resilient`** — refactored to use `resilience/` internally; public httpclient API unchanged.
+
 ## [0.13.1] — 2026-05-25
 
 Ships the `featureflag/` module — pluggable feature evaluation with optional per-eval cache.

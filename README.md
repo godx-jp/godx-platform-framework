@@ -3,7 +3,7 @@
 > **Opinionated Go SDK by godx** — modular, OpenTelemetry-native, backend-agnostic.
 > Write once, swap backends (godx-platform-observability ↔ AWS CloudWatch ↔ Datadog ↔ …) by changing one env var.
 
-[![Version](https://img.shields.io/badge/version-0.13.1-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.13.2-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](./LICENSE)
 [![Maintainer](https://img.shields.io/badge/by-godx-black.svg)](#)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](https://go.dev)
@@ -104,7 +104,7 @@ go run .
 | `notifications` | stable (v0.10.1) | mail · slack · discord · webhook · database · log channels |
 | `scheduler` | stable (v0.13.0) | cron expressions, distributed lock via cache module |
 | `featureflag` | stable (v0.13.1) | config · openfeature · launchdarkly · unleash · flagsmith |
-| `resilience` | roadmap (v0.10.4) | retry · circuit-breaker · timeout · bulkhead primitives |
+| `resilience` | stable (v0.13.2) | retry · circuit-breaker · timeout · bulkhead primitives |
 | `queue` | stable (v0.11.0) | memory · sqs · kafka · nats — Push/Dispatch, job lifecycle events |
 | `httpx` | stable (v0.12.0) | chi router + pipeline/validation/ratelimit middleware |
 | `observability/cloudwatch` | roadmap (v0.13) | full AWS CloudWatch driver for observability (stub today) |
