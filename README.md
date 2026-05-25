@@ -3,7 +3,7 @@
 > **Opinionated Go SDK by godx** — modular, OpenTelemetry-native, backend-agnostic.
 > Write once, swap backends (godx-platform-observability ↔ AWS CloudWatch ↔ Datadog ↔ …) by changing one env var.
 
-[![Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](./LICENSE)
 [![Maintainer](https://img.shields.io/badge/by-godx-black.svg)](#)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](https://go.dev)
@@ -89,8 +89,8 @@ go run .
 |--------|--------|---------|
 | `framework` | stable | App backbone — module registration, lifecycle, graceful shutdown |
 | `observability` | stable | Logs (slog JSON) + traces (OTel) + metrics (OTel) + Laravel-style channels |
-| `storage` | stable (v0.6.x) | object storage — local · memory · s3 · minio · gcs · azure (all six stable; `v0.6.2` closes the module) |
-| `cache` | roadmap (v0.7) | caching — memory · file · redis (DB-backed cache intentionally out of scope) |
+| `storage` | stable (v0.6.x) | object storage — local · memory · s3 · minio · gcs · azure (all six stable) |
+| `cache` | stable (v0.7.0) | Laravel-style cache — memory · file · redis (DB-backed cache intentionally out of scope) |
 | `observability/cloudwatch` | roadmap (v0.8) | full AWS CloudWatch driver for observability (stub today) |
 | `queue` | roadmap (v0.9) | messaging — in-memory · sqs · kafka · nats |
 | `httpx` | roadmap (v0.10) | chi router + handler conventions |
@@ -143,6 +143,43 @@ body, _ := disk.Get(ctx, "hello.txt")
 
 Adding a new driver: see [docs/DRIVER_PATTERN](./docs/DRIVER_PATTERN.md).
 
+## Drivers (cache)
+
+A **cache driver** is the in-process code that reads/writes ephemeral key/value entries on a specific backend — selected once at deploy time via per-store env vars.
+
+| Driver | `CACHE_STORE_<NAME>_DRIVER` | Status | Registration | Use case |
+|--------|------------------------------|--------|--------------|----------|
+| Memory | `memory` | stable | auto | tests, single-process services, default zero-config store |
+| File   | `file`   | stable | auto | bare-metal / VM, single-host persistence (Laravel `FileStore` layout under `./storage/framework/cache`) |
+| Redis  | `redis`  | stable (v0.7.0) | opt-in (`_ "...cache/drivers/redis"`) | shared cache across replicas; atomic INCRBY counters; SCAN-scoped Flush by prefix |
+
+Database-backed cache is intentionally out of scope — see [docs/modules/cache § Why no DB driver](./docs/modules/cache.md#why-no-db-driver).
+
+```go
+import (
+    "github.com/godx-jp/godx-platform-framework/cache"
+    _ "github.com/godx-jp/godx-platform-framework/cache/drivers/redis"
+    "github.com/godx-jp/godx-platform-framework/framework"
+)
+
+app := framework.New("svc", "1.0.0").Use(cache.Module)
+_ = app.Init(ctx)
+
+mgr, _ := cache.FromApp(app)
+store := mgr.Default()
+
+_ = store.Put(ctx, "answer", []byte("42"), 30*time.Minute)
+v, ok, _ := store.Get(ctx, "answer")
+
+n, _ := store.Increment(ctx, "visits", 1)               // atomic counter
+v2, _ := store.Remember(ctx, "expensive", time.Minute,  // cache-aside
+    func(ctx context.Context) ([]byte, error) {
+        return compute(ctx)
+    })
+```
+
+Full reference: [docs/modules/cache](./docs/modules/cache.md).
+
 ## Why this exists
 
 The Go ecosystem has excellent low-level libraries (`log/slog`, `go.opentelemetry.io/otel`, `prometheus/client_golang`) — but every team re-implements the same wiring, the same env-var conventions, the same correlation-ID propagation. This SDK packages those conventions so every service in an organisation looks the same — and so swapping backends is a configuration change, not a refactor.
@@ -166,9 +203,15 @@ godx-platform-framework/
 │       ├── internal/s3core/            shared S3 protocol impl (used by s3 + minio)
 │       ├── s3/ · minio/                heavy, opt-in blank import — stable (v0.6.1)
 │       └── gcs/ · azure/               heavy, opt-in blank import — stable (v0.6.2)
+├── cache/                              Laravel-style multi-store cache
+│   ├── driver/                         Public driver contract (interface, Spec, registry)
+│   └── drivers/
+│       ├── memory/ · file/             light, auto-registered
+│       └── redis/                      heavy, opt-in blank import — stable (v0.7.0)
 ├── examples/
 │   ├── minimal/                        25-line example
-│   └── http-server/                    HTTP server with traced handler + middleware
+│   ├── http-server/                    HTTP server with traced handler + middleware
+│   └── cache/                          Laravel-style cache walkthrough
 ├── docs/
 │   ├── README.md                       docs index
 │   ├── GETTING_STARTED.md
@@ -200,6 +243,7 @@ The internal layout of every future module (storage, cache, queue, ...) is ident
 | [DRIVER_PATTERN](./docs/DRIVER_PATTERN.md) | Anyone touching drivers — shared convention for every module |
 | [modules/observability](./docs/modules/observability.md) | App developers using observability |
 | [modules/storage](./docs/modules/storage.md) | App developers using storage |
+| [modules/cache](./docs/modules/cache.md) | App developers using cache |
 | [CONFIGURATION](./docs/CONFIGURATION.md) | Operators — every env var |
 | [VERSIONING](./docs/VERSIONING.md) | Consumers — SemVer policy |
 

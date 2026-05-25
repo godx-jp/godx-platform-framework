@@ -162,6 +162,49 @@ import _ "github.com/godx-jp/godx-platform-framework/storage/drivers/minio"
 | `gcs`  | **stable** | `BUCKET` | Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS`, `gcloud auth application-default login`, Workload Identity). Setting `ENDPOINT` switches to emulator mode (`fake-gcs-server`). `SignedURL` requires a service-account JSON key |
 | `azure` | **stable** | `BUCKET` (container), `ENDPOINT` (service URL) | Shared-key auth (`ACCESS_KEY` = account name + `SECRET_KEY` = account key) is the preferred mode — only that combination can issue SAS via `TemporaryURL`. Without it, the driver falls back to `DefaultAzureCredential` |
 
+## Cache — common
+
+The cache module loads zero or more named stores from the environment. With nothing set, you get a single in-process `memory` store.
+
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CACHE_DEFAULT_STORE` | string | `memory` | Name returned by `Manager.Default()` |
+| `CACHE_STORES` | comma list | `<value of CACHE_DEFAULT_STORE>` | Stores to register; each name resolves to per-store `CACHE_STORE_<NAME>_*` env vars |
+| `CACHE_PREFIX` | string | _unset_ | Global prefix prepended to every key across every store. Useful when one Redis is shared between many services |
+
+## Cache — per-store env vars
+
+For each store `<NAME>` listed in `CACHE_STORES`, the module reads env vars prefixed `CACHE_STORE_<NAME>_`. Store-name normalisation matches storage disks: case-insensitive; hyphens and spaces convert to underscores (`user-sessions` ⇒ `CACHE_STORE_USER_SESSIONS_*`).
+
+When `<NAME>` matches a known driver name (`memory`, `file`, `redis`) and `DRIVER` is unset, the driver is inferred from the name.
+
+| Variable | Type | Default | Driver scope | Purpose |
+|----------|------|---------|--------------|---------|
+| `CACHE_STORE_<NAME>_DRIVER` | enum | inferred from name, else `memory` | all | `memory` · `file` · `redis` |
+| `CACHE_STORE_<NAME>_PREFIX` | string | _unset_ | all | Prefix prepended to every key. Composed with `CACHE_PREFIX` |
+| `CACHE_STORE_<NAME>_DEFAULT_TTL` | duration | `0` (forever) | all | Currently informational — Store helpers that opt in (custom code) may consult it; drivers always honour the per-call TTL |
+| `CACHE_STORE_<NAME>_PATH` | string | `./storage/framework/cache` (when DRIVER=file) | file | Filesystem root. Laravel-faithful default |
+| `CACHE_STORE_<NAME>_URL` | string | _unset_ | redis | Full URL — `redis://[user:pass@]host:port[/db]`. Preferred over component fields |
+| `CACHE_STORE_<NAME>_ADDRESS` | string | _unset_ | redis | `host:port`. Required when URL is empty |
+| `CACHE_STORE_<NAME>_USERNAME` | string | _unset_ | redis | ACL username (Redis 6+) |
+| `CACHE_STORE_<NAME>_PASSWORD` | string | _unset_ | redis | Password |
+| `CACHE_STORE_<NAME>_DB` | int | `0` | redis | Logical database index |
+| `CACHE_STORE_<NAME>_TLS` | bool | `false` | redis | Reserved for future use (rediss:// URLs already pick this up) |
+
+## Cache — heavy drivers (opt-in)
+
+The redis driver carries the `go-redis/v9` SDK and is registered only when the consumer blank-imports it. Light drivers (`memory`, `file`) auto-register.
+
+```go
+import _ "github.com/godx-jp/godx-platform-framework/cache/drivers/redis"
+```
+
+| Driver | Status (v0.7.0) | Required env keys | Notes |
+|--------|------------------|--------------------|-------|
+| `memory` | **stable** | _none_ | Single-process map. Periodic TTL sweeper. Light |
+| `file`   | **stable** | `PATH` (defaulted) | One *.cache file per key, JSON envelope. Atomic via tmp+rename. Light |
+| `redis`  | **stable** | `URL` _or_ `ADDRESS` | Native INCRBY for atomic counters. Prefix-scoped Flush via SCAN+UNLINK. Heavy |
+
 ## HTTP middleware
 
 | Constant | Default | Purpose |
@@ -252,4 +295,21 @@ OBSERVABILITY_TRACE_SAMPLE_RATE=1.0
 # # STORAGE_DISK_DEVCACHE_ENDPOINT=http://localhost:9000
 # # STORAGE_DISK_DEVCACHE_ACCESS_KEY=minioadmin
 # # STORAGE_DISK_DEVCACHE_SECRET_KEY=minioadmin
+
+# --- Cache (Laravel-style multi-store; zero env vars ⇒ single in-memory store) ---
+# CACHE_DEFAULT_STORE=primary
+# CACHE_STORES=primary,sessions
+# CACHE_PREFIX=svc:                              # global prefix prepended to every key
+#
+# # Primary cache on Redis (require: import _ ".../cache/drivers/redis")
+# CACHE_STORE_PRIMARY_DRIVER=redis
+# CACHE_STORE_PRIMARY_URL=redis://:secret@127.0.0.1:6379/0
+# CACHE_STORE_PRIMARY_PREFIX=primary:
+#
+# # File-backed session cache (Laravel-faithful default path)
+# CACHE_STORE_SESSIONS_DRIVER=file
+# CACHE_STORE_SESSIONS_PATH=./storage/framework/sessions
+#
+# # Or a single in-process memory store — no config needed
+# # (the default when nothing else is set)
 ```

@@ -42,6 +42,11 @@ godx-platform-framework/
 │       ├── internal/s3core/            shared S3 protocol impl (used by s3 + minio)
 │       ├── s3/ · minio/                (heavy — opt-in; stable v0.6.1)
 │       └── gcs/ · azure/               (heavy — opt-in; stable v0.6.2)
+├── cache/                              Laravel-style multi-store cache (v0.7.0)
+│   ├── driver/                         Public driver contract
+│   └── drivers/
+│       ├── memory/ · file/             (light — auto-registered)
+│       └── redis/                      (heavy — opt-in; go-redis/v9)
 │
 ├── cache/                              Future — same skeleton (driver/, drivers/memory|redis/, ...)
 ├── queue/                              Future
@@ -185,7 +190,7 @@ The same pattern repeats for every future module — see [DRIVER_PATTERN](./DRIV
 | 0.4.x | layout standardisation | per-driver subpackages, `<module>/driver` registry, `<module>/middleware` sub-package, opt-in heavy drivers |
 | 0.5.x | channel maturity | per-channel level filter, env-driven channels (`ChannelsFromEnv()`), per-sub stack level (`stdout:info,file:warn`) — Laravel `config/logging.php` parity |
 | 0.6.x | **`storage` module — complete** | Laravel `Storage` parity. v0.6.0: local + memory · v0.6.1: s3 + minio (shared `internal/s3core`) · **v0.6.2: gcs + azure**. All six drivers stable; module closes at 0.6.2 |
-| 0.7.x | **`cache` module** | Laravel `Cache` parity — Manager + Store (memory · file · redis). DB-backed cache intentionally out of scope |
+| 0.7.x | **`cache` module — shipped** | Laravel `Cache` parity. **v0.7.0: memory + file + redis** (Manager + Store + JSON helpers + atomic counters + per-key locking for file). DB-backed cache intentionally out of scope |
 | 0.8.x | `cloudwatch` driver | AWS ADOT exporters; configurable correlation header |
 | 0.9.x | `queue` module | drivers: in-memory · sqs · kafka · nats |
 | 0.10.x | `httpx` module | chi router + handler conventions |

@@ -4,6 +4,52 @@ All notable changes are documented here. Format: [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-05-25
+
+New module — Laravel-faithful **`cache`** with three drivers: `memory`, `file`, `redis`. By explicit user direction, database-backed cache is out of scope.
+
+### Added — `cache` module
+
+- **`cache` package** — same boot-time shape as `observability` and `storage`. `cache.Module` reads `CACHE_*` from the environment, builds every configured store, and publishes a `*Manager` into the framework `App` under `cache.StoreKey`. `cache.ModuleWithConfig` and `cache.AddStore` cover code-driven and "extra store after boot" wiring respectively.
+- **`Manager` + `Store`** — Laravel `Cache` parity. `mgr.Default()` / `mgr.Store(name)` returns a `*Store`; the store exposes `Get`, `Put`, `Forever`, `Add`, `Pull`, `Forget`, `Has`, `Missing`, `Flush`, `Remember`, `RememberForever`, `Increment`, `Decrement`. JSON convenience helpers (`GetJSON`, `PutJSON`, `RememberJSON`) cover the most common "cache a struct" pattern without forcing callers to repeat marshal/unmarshal boilerplate.
+- **`cache/driver`** — public contract package. `Driver` interface (8 methods); typed sentinels `ErrNotSupported`, `ErrNotImplemented`, `ErrNotInteger`; in-process registry mirroring the storage module so out-of-tree drivers register identically (`driver.Register("mydb", construct)`).
+- **`cache/context`** — `ContextWithManager` / `FromContext` for handlers that prefer context-attached state; `FromApp` is the canonical way to retrieve the manager from a `framework.App`.
+
+### Added — drivers
+
+- **`cache/drivers/memory`** (light, auto-registered) — `sync.Mutex`-guarded map with a 30-second sweeper goroutine that purges expired entries so memory does not grow unbounded under TTL-heavy workloads. Returned slices are copies so callers cannot poison the cache by mutating them. Prefix-scoped Flush.
+- **`cache/drivers/file`** (light, auto-registered) — Laravel `FileStore` layout: one `*.cache` file per key, JSON envelope `{ "exp": <unix-ms>, "val": <base64> }`, two-level hash sharding (`<root>/XX/YY/<sha1>.cache`) so directories stay browsable on every filesystem. Writes go via tmp + `os.Rename` so partial writes never corrupt a key. Per-key locking keeps `Add` and `Increment` atomic in-process; `os.Rename` provides cross-process atomicity on POSIX/NT filesystems.
+- **`cache/drivers/redis`** (heavy, opt-in) — `github.com/redis/go-redis/v9` client. `Put` -> `SET (PX)`, `Add` -> `SET NX (PX)`, `Increment`/`Decrement` -> native `INCRBY`/`DECRBY` (full atomicity even under heavy contention), `Flush` -> `SCAN`+`UNLINK` scoped to the configured prefix (or `FLUSHDB` when no prefix is set). Supports both `URL` (`redis://user:pass@host:port/db`) and component-wise (`ADDRESS` + `USERNAME` + `PASSWORD` + `DB`) configuration. Ping at construct time so misconfigurations crash on boot rather than at first cache call.
+
+### Config
+
+- New env-var family `CACHE_*` (no abbreviations, matching the rest of the SDK):
+  - `CACHE_DEFAULT_STORE` (default `memory`), `CACHE_STORES` (CSV), `CACHE_PREFIX` (global prefix prepended to every key across every store).
+  - Per-store `CACHE_STORE_<NAME>_DRIVER`, `_PREFIX`, `_DEFAULT_TTL`, `_PATH` (file), and `_URL` / `_ADDRESS` / `_USERNAME` / `_PASSWORD` / `_DB` / `_TLS` (redis).
+- Driver-name shortcut: `CACHE_STORES=redis` infers `CACHE_STORE_REDIS_DRIVER=redis` automatically, so very small services don't need to repeat the name.
+- File-driver path defaults to `./storage/framework/cache` (Laravel-faithful) when `DRIVER=file` and no `PATH` is supplied.
+
+### Tests
+
+- Per-driver unit tests cover put/get/forget round trip, TTL expiry, `Add` atomicity (100-goroutine contention test on file driver — exactly one wins), atomic increment/decrement, `ErrNotInteger` rejection on non-numeric values, prefix-scoped `Flush`, and (for file) cross-instance persistence + on-disk layout invariants.
+- `Store` + `Manager` tests cover `Remember` (caches once), `Pull` (atomic read-and-delete), JSON helpers, manager wiring through `framework.Module`, duplicate-store rejection, and the "driver not registered" diagnostic path.
+- `//go:build integration` test for the redis driver hits a live redis-server: round trip + TTL + `SET NX` + concurrent counter (50 goroutines × 10 incrs = exactly 500) + prefix-scoped Flush. Verified live against `redis:7-alpine`.
+
+### Example
+
+- `examples/cache/main.go` is a 100-line walkthrough of every Store method against the default store, with three documented configurations (in-memory, file, redis).
+
+### Docs
+
+- New `docs/modules/cache.md` reference covering concepts, env-driven configuration, programmatic wiring, the full Store API, the driver matrix, per-driver guides, error model, lifecycle, and the rationale for not shipping a database-backed cache driver.
+- `README.md`, `docs/CONFIGURATION.md`, `docs/ARCHITECTURE.md` updated for v0.7.0: cache module added to the module list, cache env vars added to the configuration reference, roadmap shifted (CloudWatch driver moves to 0.8.x).
+
+### Roadmap
+
+- 0.7.x cache module closes here for now (memory + file + redis).
+- 0.8.x reopens the observability track with the CloudWatch driver.
+- 0.9.x queue · 0.10.x httpx.
+
 ## [0.6.2] — 2026-05-25
 
 Heavy storage drivers, round 2 — Google Cloud Storage and Azure Blob Storage now ship as real implementations. With this release the storage matrix is complete (six drivers: `local`, `memory`, `s3`, `minio`, `gcs`, `azure`) and `v0.6.x` closes.
