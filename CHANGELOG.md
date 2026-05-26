@@ -2,6 +2,26 @@
 
 All notable changes are documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · versioning: [SemVer](https://semver.org/).
 
+## [1.9.0] — 2026-05-26
+
+### Added
+
+- **database** — connection manager module (postgres, mysql, sqlite drivers); env-based multi-connection config.
+- **database** — `WithTx` with serialization/deadlock retry; query log/trace via pgx tracer and otelsql.
+- **database** — read/write split, sticky reads, pool metrics collector, auto health probes.
+- **database/notifications** — `PostgresStore` implementing `notifications/driver.DatabaseStore`.
+- **docs/modules/database.md** — module reference.
+- **observability** — RED HTTP metrics (`http.server.request.duration`, `http.server.active_requests`) via the HTTP middleware; route-template (not raw-path) span names & labels; status-mapped log severity (5xx→ERROR, 4xx→WARN). (RFC 0001 P1)
+- **observability** — central `ErrorReporter` (log + metric + optional rate-limited notifier); notifier dispatch is async + bounded so a slow alerting sink never blocks request handlers. Adapters `HTTPErrorObserver`/`ErrorHook`/`JobErrorHook`. (RFC 0001 P3)
+- **observability** — opt-in `NonBlockingHandler` async logging (`OBSERVABILITY_LOG_ASYNC`): bounded queue, drop-and-count on overflow so a stalled log sink cannot block the application.
+- **httpx** — `ErrorObserver`/`SetErrorObserver` to observe handler errors; `InstrumentedRouter` composing tracing + RED metrics + recover. (RFC 0001 P2)
+- **resilience** — circuit breaker `State` + `OnStateChange`; httpclient logs breaker open/close. (RFC 0001 P4)
+- **docs** — RFC 0001 (error observability & early-warning) and `docs/OBSERVABILITY.md` guide.
+
+### Changed
+
+- TBK services migrate from `go-common/dbutil` to `framework/database` + `go-common/tenancy` + `go-common/messaging/postgres`.
+
 ## [1.8.1] — 2026-05-26
 
 ### Added

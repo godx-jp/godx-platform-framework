@@ -109,6 +109,7 @@ go run .
 | `httpx` | stable (v0.12.0) | chi router + pipeline/validation/ratelimit middleware |
 | `observability/cloudwatch` | stable (v1.0.0) | AWS CloudWatch Logs driver (replaces stub) |
 | `health` | stable (v0.14.0) | `/healthz`, `/readyz`, RegisterProbe dependency checks |
+| `database` | stable (v1.9.0) | connection manager — postgres · mysql · sqlite; read/write split, WithTx, query trace |
 
 Every module follows the [driver pattern](./docs/DRIVER_PATTERN.md): top-level package, public `driver/` contract, per-implementation `drivers/<name>/` package, optional `middleware/` sub-package.
 

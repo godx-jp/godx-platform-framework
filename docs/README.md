@@ -40,5 +40,6 @@ Index for the godx-platform-framework documentation.
 | `queue` | stable (v0.11.0) | [modules/queue](./modules/queue.md) |
 | `httpx` | roadmap (v0.12) | — |
 | `health` | roadmap (v0.14) | — |
+| `database` | stable (v1.9.0) | [modules/database](./modules/database.md) |
 
 Future modules each get their own file under `docs/modules/`. The driver pattern, naming convention, and layout are pinned in [DRIVER_PATTERN](./DRIVER_PATTERN.md) so every new module is structurally identical.
