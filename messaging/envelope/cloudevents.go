@@ -20,6 +20,7 @@ type Event struct {
 	Subject         string
 	Time            time.Time
 	DataContentType string
+	DataSchema      string
 	Data            []byte
 }
 
@@ -52,6 +53,9 @@ func Encode(e Event) ([]byte, error) {
 	if e.Subject != "" {
 		payload["subject"] = e.Subject
 	}
+	if e.DataSchema != "" {
+		payload["dataschema"] = e.DataSchema
+	}
 	return json.Marshal(payload)
 }
 
@@ -75,6 +79,7 @@ func Decode(b []byte) (Event, error) {
 	e.Type = unquote("type")
 	e.Subject = unquote("subject")
 	e.DataContentType = unquote("datacontenttype")
+	e.DataSchema = unquote("dataschema")
 	if sv := unquote("specversion"); sv != "" && sv != SpecVersion {
 		return Event{}, fmt.Errorf("cloudevents: unsupported specversion %q (expected %q)", sv, SpecVersion)
 	}

@@ -2,6 +2,12 @@
 
 All notable changes are documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · versioning: [SemVer](https://semver.org/).
 
+## [1.10.0] — 2026-05-26
+
+### Added
+
+- **messaging/envelope** — optional `dataschema` field on CloudEvents JSON encode/decode (CNCF v1.0.2 binding).
+
 ## [1.9.0] — 2026-05-26
 
 ### Added

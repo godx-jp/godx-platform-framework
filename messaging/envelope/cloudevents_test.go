@@ -9,6 +9,28 @@ import (
 	"github.com/godx-jp/godx-platform-framework/messaging/envelope"
 )
 
+func TestEncodeDecodeRoundtripDataSchema(t *testing.T) {
+	e := envelope.Event{
+		ID:              "abc",
+		Source:          "urn:tiximax:service:engagement",
+		Type:            "tiximax.notification.delivered.v1",
+		DataContentType: "application/json",
+		DataSchema:      "type.googleapis.com/tiximax.notification.v1.NotificationDelivered",
+		Data:            []byte(`{"notificationId":"n-1"}`),
+	}
+	b, err := envelope.Encode(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := envelope.Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DataSchema != e.DataSchema {
+		t.Fatalf("dataschema=%q want %q", got.DataSchema, e.DataSchema)
+	}
+}
+
 func TestEncodeDecodeRoundtrip(t *testing.T) {
 	e := envelope.Event{
 		ID: "abc", Source: "svc", Type: "orders.order.placed.v1", Data: []byte(`{"ok":true}`),
