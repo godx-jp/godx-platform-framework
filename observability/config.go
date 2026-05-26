@@ -71,6 +71,16 @@ type Config struct {
 	// log record to each named sub-driver. Each sub-driver inherits the
 	// rest of this Config (so OTLP / file settings flow through).
 	StackDrivers []string
+
+	// LogAsync enables the OPT-IN non-blocking log path: the driver's slog
+	// handler is wrapped in a [NonBlockingHandler] so a stalled log sink can
+	// never block the calling goroutine (records are dropped on overflow
+	// rather than blocking). Default false, which keeps the synchronous,
+	// guaranteed-delivery behavior. Traces / metrics are unaffected.
+	LogAsync bool
+	// LogAsyncBufferSize bounds the in-flight async log queue when
+	// LogAsync is true. A value <= 0 selects a sensible default (4096).
+	LogAsyncBufferSize int
 }
 
 // LoadConfigFromEnv reads SDK configuration from environment variables.
@@ -93,6 +103,8 @@ type Config struct {
 //	OBSERVABILITY_LOG_FILE_MAX_BACKUPS    0
 //	OBSERVABILITY_LOG_FILE_COMPRESS       true
 //	OBSERVABILITY_STACK_DRIVERS           (empty, comma-separated)
+//	OBSERVABILITY_LOG_ASYNC               false
+//	OBSERVABILITY_LOG_ASYNC_BUFFER        4096
 //
 // ServiceName / ServiceVersion are not populated by this function; the
 // framework module sets them from [framework.App].
@@ -114,6 +126,8 @@ func LoadConfigFromEnv() Config {
 		LogFileMaxBackups:  parseInt(getEnv("OBSERVABILITY_LOG_FILE_MAX_BACKUPS", "0"), 0),
 		LogFileCompress:    parseBool(getEnv("OBSERVABILITY_LOG_FILE_COMPRESS", "true"), true),
 		StackDrivers:       parseCSV(os.Getenv("OBSERVABILITY_STACK_DRIVERS")),
+		LogAsync:           parseBool(getEnv("OBSERVABILITY_LOG_ASYNC", "false"), false),
+		LogAsyncBufferSize: parseInt(getEnv("OBSERVABILITY_LOG_ASYNC_BUFFER", "4096"), 4096),
 	}
 	return cfg
 }

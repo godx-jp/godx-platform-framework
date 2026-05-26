@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
@@ -21,6 +22,11 @@ type Provider struct {
 	logger *slog.Logger
 	tracer trace.Tracer
 	meter  metric.Meter
+
+	// asyncHandler is non-nil only when cfg.LogAsync is true. It wraps the
+	// driver's slog handler with a bounded, non-blocking queue and must be
+	// flushed before the driver is shut down (see Shutdown).
+	asyncHandler *NonBlockingHandler
 
 	channels channelRegistry
 }
@@ -57,9 +63,22 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 		return nil, fmt.Errorf("observability: driver %q: %w", cfg.Driver, err)
 	}
 
+	// Optionally interpose the bounded, non-blocking async handler between
+	// the contextHandler and the driver handler. The contextHandler still
+	// enriches the record synchronously (trace_id / correlation_id); the
+	// async handler then queues the enriched record so a stalled sink cannot
+	// block the caller. Default (LogAsync=false) leaves the path synchronous
+	// and byte-for-byte identical to before.
+	var asyncHandler *NonBlockingHandler
+	logHandler := d.LoggerHandler()
+	if cfg.LogAsync {
+		asyncHandler = NewNonBlockingHandler(logHandler, cfg.LogAsyncBufferSize)
+		logHandler = asyncHandler
+	}
+
 	// Wrap the slog handler so trace_id / correlation_id are injected
 	// automatically from context.
-	logger := slog.New(&contextHandler{inner: d.LoggerHandler()}).With(
+	logger := slog.New(&contextHandler{inner: logHandler}).With(
 		slog.String("service", cfg.ServiceName),
 		slog.String("version", cfg.ServiceVersion),
 		slog.String("env", cfg.Environment),
@@ -69,11 +88,12 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 	otel.SetMeterProvider(d.MeterProvider())
 
 	p := &Provider{
-		cfg:    cfg,
-		driver: d,
-		logger: logger,
-		tracer: d.TracerProvider().Tracer(cfg.ServiceName),
-		meter:  d.MeterProvider().Meter(cfg.ServiceName),
+		cfg:          cfg,
+		driver:       d,
+		logger:       logger,
+		tracer:       d.TracerProvider().Tracer(cfg.ServiceName),
+		meter:        d.MeterProvider().Meter(cfg.ServiceName),
+		asyncHandler: asyncHandler,
 	}
 	setGlobalProvider(p)
 	return p, nil
@@ -123,10 +143,19 @@ func (p *Provider) Tracer() trace.Tracer { return p.tracer }
 // Meter returns the OTel meter scoped to the service name.
 func (p *Provider) Meter() metric.Meter { return p.meter }
 
-// Shutdown flushes pending telemetry and tears the driver down.
+// Shutdown flushes pending telemetry and tears the driver down. When the
+// async log path is enabled it is flushed FIRST — draining queued records
+// into the driver handler — and only then is the driver shut down, so
+// in-flight logs reach the sink before it closes. The async-flush error and
+// the driver-shutdown error are joined.
 func (p *Provider) Shutdown(ctx context.Context) error {
 	clearGlobalProvider(p)
-	return p.driver.Shutdown(ctx)
+	var asyncErr error
+	if p.asyncHandler != nil {
+		asyncErr = p.asyncHandler.Shutdown(ctx)
+	}
+	driverErr := p.driver.Shutdown(ctx)
+	return errors.Join(asyncErr, driverErr)
 }
 
 // --- contextHandler injects trace + correlation IDs into every log record.
