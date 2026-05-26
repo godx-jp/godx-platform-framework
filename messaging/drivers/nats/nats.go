@@ -93,12 +93,18 @@ func (b *broker) ensureStream(_ context.Context, name string, spec mdriver.Spec)
 	if err == nil {
 		return nil
 	}
-	_, err = b.js.AddStream(&natsgo.StreamConfig{
+	subjects := streamSubjects(b.prefix)
+	streamCfg := natsgo.StreamConfig{
 		Name:     name,
-		Subjects: streamSubjects(b.prefix),
+		Subjects: subjects,
 		Storage:  natsgo.FileStorage,
 		Replicas: replicas,
-	})
+	}
+	// JetStream requires NoAck when a stream captures all subjects (">").
+	if len(subjects) == 1 && strings.HasSuffix(subjects[0], ">") {
+		streamCfg.NoAck = true
+	}
+	_, err = b.js.AddStream(&streamCfg)
 	if err != nil && !strings.Contains(err.Error(), "stream name already in use") {
 		return fmt.Errorf("messaging/nats: add stream: %w", err)
 	}
