@@ -8,55 +8,93 @@ on:
 permissions:
   contents: read
 
+# RUNNER — `[self-hosted, swarm-pool]`, không phải `ubuntu-latest`. Runner của
+# GitHub tính tiền; từ 09/2026 cả org chạy trên đàn `swarm-pool` (image
+# `tempo-runner-php:noble`: KHÔNG có Go, có docker CLI dùng chung daemon của
+# host). Gọi đích danh nhãn `swarm-pool`: `self-hosted` một mình là nhãn tự
+# động, không phân biệt được máy nào.
+#
+# KHÔNG `actions/setup-go`: mỗi lượt nó tải toolchain qua đường mạng của đàn
+# (runner phù du, không giữ được gì giữa hai job). Thay bằng image chính thức
+# `golang:<ver>` — daemon của host giữ image lại, chỉ tải lần đầu trên mỗi node.
+#
+# `docker cp` thay vì `-v "$PWD:/app"`: runner LÀ container, workspace nằm trong
+# overlay của nó — bind mount trỏ vào đường dẫn TRÊN HOST, và ở đó trống (đo
+# 05/09/2026: `ls /app` → rỗng). Nên: `docker create` → `docker cp` workspace
+# vào → `docker start`, rồi mỗi bước là một `docker exec` vào cùng container.
 jobs:
   test:
     name: vet + test (Go ${{ matrix.go }})
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, swarm-pool]
     strategy:
       matrix:
-        go: ['1.23', '1.24']
+        # go.mod khai `go 1.25.0`. Ma trận cũ 1.23/1.24 chỉ đúng trên nhãn:
+        # setup-go 1.23 gặp go.mod 1.25 thì GOTOOLCHAIN=auto tự tải go1.25 về
+        # chạy — cả hai job đều thực chất chạy 1.25. Image `golang:*` đặt
+        # GOTOOLCHAIN=local nên 1.23/1.24 sẽ từ chối go.mod này thẳng thừng.
+        # Ghi đúng con số đang chạy thật.
+        go: ['1.25']
+    env:
+      GO_CTR: ci-go-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.go }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go }}
-          cache: true
+      - name: Khởi động container Go ${{ matrix.go }}
+        run: |
+          docker rm -f "$GO_CTR" >/dev/null 2>&1 || true
+          docker create --name "$GO_CTR" -w /app "golang:${{ matrix.go }}" sleep infinity >/dev/null
+          docker cp "$PWD/." "$GO_CTR:/app"
+          docker start "$GO_CTR" >/dev/null
+          docker exec "$GO_CTR" go version
 
       - name: go mod tidy (no changes)
         run: |
-          go mod tidy
-          git diff --exit-code go.mod go.sum
+          docker exec "$GO_CTR" sh -c 'go mod tidy && git diff --exit-code go.mod go.sum'
 
       - name: go vet
-        run: go vet ./...
+        run: docker exec "$GO_CTR" go vet ./...
 
       - name: go test -race
-        run: go test -race -timeout 120s -coverprofile=coverage.txt -covermode=atomic ./...
+        run: docker exec "$GO_CTR" go test -race -timeout 120s -coverprofile=coverage.txt -covermode=atomic ./...
 
       - name: examples build
         run: |
-          (cd examples/minimal && go build ./...)
-          (cd examples/http-server && go build ./...)
+          docker exec "$GO_CTR" sh -c '(cd examples/minimal && go build ./...)'
+          docker exec "$GO_CTR" sh -c '(cd examples/http-server && go build ./...)'
+
+      # coverage.txt sinh ra TRONG container — lấy ra rồi mới upload được.
+      - name: Lấy coverage ra khỏi container
+        if: matrix.go == '1.25'
+        run: docker cp "$GO_CTR:/app/coverage.txt" coverage.txt || true
 
       - name: upload coverage
-        if: matrix.go == '1.23'
+        if: matrix.go == '1.25'
         uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: coverage.txt
           if-no-files-found: warn
 
+      - name: Dọn container Go
+        if: always()
+        run: docker rm -f "$GO_CTR" >/dev/null 2>&1 || true
+
   lint:
     name: golangci-lint
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, swarm-pool]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-          cache: true
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.61
-          args: --timeout=5m
+
+      # `golangci/golangci-lint-action@v6` cần Go trên PATH của runner — không có.
+      # Image chính thức `golangci/golangci-lint:v1.61.0` mang sẵn Go + binary
+      # đúng bản v1.61 mà action đang ghim; cùng tham số `--timeout=5m`.
+      - name: golangci-lint v1.61
+        run: |
+          name="ci-lint-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "$name" >/dev/null 2>&1 || true
+          cid=$(docker create --name "$name" -w /app golangci/golangci-lint:v1.61.0 golangci-lint run --timeout=5m)
+          docker cp "$PWD/." "$cid:/app"
+          docker start -a "$cid" || true
+          rc=$(docker wait "$cid")
+          docker rm -f "$cid" >/dev/null
+          exit "$rc"
