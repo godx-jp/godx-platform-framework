@@ -39,10 +39,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Hai volume CÓ TÊN trên daemon của host giữ kho module và cache build
+      # của Go giữa các lượt (runner phù du không giữ được gì). Đo lượt đầu
+      # 05/09/2026 không có volume: `go mod tidy` mất 3m40s chỉ để tải module
+      # qua đường mạng của đàn — gần nửa job. Sweeper của đàn chỉ xoá volume
+      # ẨN DANH nên hai volume này sống qua các đợt dọn. Cache của Go an toàn
+      # khi nhiều job dùng chung (khoá tệp), nên ma trận chạy song song vẫn ổn.
       - name: Khởi động container Go ${{ matrix.go }}
         run: |
           docker rm -f "$GO_CTR" >/dev/null 2>&1 || true
-          docker create --name "$GO_CTR" -w /app "golang:${{ matrix.go }}" sleep infinity >/dev/null
+          docker create --name "$GO_CTR" -w /app \
+            -v ci-go-mod:/go/pkg/mod -v ci-go-build:/root/.cache/go-build \
+            "golang:${{ matrix.go }}" sleep infinity >/dev/null
           docker cp "$PWD/." "$GO_CTR:/app"
           docker start "$GO_CTR" >/dev/null
           docker exec "$GO_CTR" go version
